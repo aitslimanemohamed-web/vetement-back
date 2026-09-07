@@ -240,6 +240,9 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
 - **COR-005** — Palette de l'accueil corrigée (thème clair forcé, contrastes mesurés ≥ 4,5:1,
   associations vert/doré supprimées) et les deux illustrations de vêtements remplacées par des
   SVG originaux plus sobres. Détail complet en journal ci-dessous.
+- **COR-006** — Motif de fond étoilé (`algerian-pattern.svg`) retiré et supprimé du projet,
+  remplacé par un fond uni clair. Règle graphique correspondante ajoutée en section G. Détail
+  complet en journal ci-dessous.
 
 **Prévu (pas commencé) :**
 - Conception de la base de données.
@@ -317,6 +320,21 @@ CI (section D, sous-section Hébergement).
 | 2026-09-07 | Une seule police (Cairo, via `next/font/google`) pour tout le site, latin et arabe | Évite un changement de police perceptible (et le décalage de mise en page associé) lors du changement de langue ; auto-hébergée au build, sans dépendance réseau externe à l'exécution. |
 | 2026-09-07 | Thème **clair forcé** sur l'accueil pour cette version, y compris quand le système est en mode sombre (`color-scheme: light`, plus de bloc `@media (prefers-color-scheme: dark)`) | Demandé explicitement par l'utilisateur (COR-005) après un rendu jugé trop sombre sur téléphone. Origine identifiée par vérification directe du code (pas supposée) : uniquement un bloc CSS `@media (prefers-color-scheme: dark)` dans `src/styles/tokens.css` — aucun mécanisme JavaScript, aucun attribut `data-theme` n'existe dans ce projet. |
 | 2026-09-07 | Nouvelle palette claire (vert `#006233`/`#004d28`, blanc cassé `#f8faf9`, vert très pâle `#eaf4ee`, rouge `#c62828` ponctuel, gris `#d8e2dc`) remplace l'ancienne palette sable/doré | Corrige les associations vert-sur-doré peu lisibles signalées par l'utilisateur ; contrastes mesurés (voir section H, COR-005) : minimum 5,36:1 sur les paires texte/fond réellement utilisées, objectif ≥ 4,5:1 tenu. |
+| 2026-09-07 | Motifs géométriques répétés (étoiles) retirés des fonds de section, remplacés par des fonds unis | Demandé explicitement par l'utilisateur (COR-006) — voir la règle graphique ci-dessous, qui remplace la décision TECH-003/US-004 d'utiliser un motif géométrique décoratif inspiré du zellige. |
+
+### Règle graphique à mémoriser (COR-006, 2026-09-07)
+
+> L'utilisateur ne souhaite pas de motifs étoilés répétés en décoration de fond. Privilégier
+> des fonds unis et clairs. Cette décision remplace la précédente proposition de motifs
+> géométriques pour ces arrière-plans.
+
+Cette règle annule et remplace la décision US-004 d'utiliser un motif géométrique répété
+(`algerian-pattern.svg`, étoile à huit branches inspirée du zellige) comme fond décoratif de
+la section « Les vêtements à découvrir ». Ce fichier a été supprimé du projet (voir journal
+COR-006) : ne pas le recréer, ni le remplacer par un autre symbole ou motif décoratif répété.
+Les fonds de section utilisent désormais uniquement les couleurs unies de la palette (section
+D/G, décision de la palette claire COR-005) — pas de nouvelle image de fond sans validation
+explicite de l'utilisateur.
 
 ### Questions ouvertes (aucune solution proposée ici ne vaut décision)
 
@@ -558,3 +576,40 @@ CI (section D, sous-section Hébergement).
 - **Commit** : `3bb8e3e` (vetement-front).
 - **Travail restant** : captures d'écran et contrôle visuel humain multi-appareils (voir
   ci-dessus) ; le reste du périmètre COR-005 est livré.
+
+### 2026-09-07 — COR-006 — Suppression des motifs étoilés du fond de page
+
+- **Correction demandée par l'utilisateur** : motif étoilé répété visible en fond de la
+  section « Les vêtements à découvrir » jugé indésirable — l'utilisateur souhaite des fonds
+  unis et clairs, sans motif décoratif répété.
+- **Dépôt concerné** : vetement-front uniquement.
+- **Identification, pas supposition** : recherche explicite (`grep` sur tout le code source,
+  hors `node_modules`) de toute référence à `algerian-pattern.svg` — une seule occurrence
+  trouvée, dans `src/features/home/ListingsPlaceholder.module.css`
+  (`background-image: url('/images/algerian-pattern.svg')`, motif répété en `background-size:
+  48px 48px`). Aucune autre section, composant ou style n'utilisait ce fichier ou un motif
+  similaire.
+- **Résultat réalisé et vérifié** :
+  - Le fond de cette section utilise désormais une couleur unie de la palette existante
+    (`var(--color-bg)`, blanc cassé `#f8faf9`) au lieu de l'image répétée.
+  - Le fichier `public/images/algerian-pattern.svg`, devenu inutilisé après vérification de
+    ses usages, a été supprimé du dépôt (pas seulement débranché du CSS).
+  - Aucun autre motif ou symbole décoratif répété n'a été ajouté à la place, conformément à la
+    règle graphique désormais consignée en section G.
+  - Disposition, cartes, illustrations de vêtements (cintre + vêtement redessinés en COR-005),
+    textes, palette claire et fonctionnalités (langues, RTL, boutons désactivés, diagnostic
+    séparé, déploiement automatique, `noindex`) inchangés.
+- **Vérifications effectuées** : `npm run type-check`, `npm run lint` (0 erreur, mêmes 2
+  avertissements bénins déjà connus), `npm test` (6 tests toujours verts), `npm run build`.
+  Recherche répétée du motif dans le CSS compilé (local puis en ligne) : aucune occurrence.
+  Vérification en ligne réelle après déploiement Vercel : `GET
+  https://vetement-front.vercel.app/images/algerian-pattern.svg` → 404 (fichier bien retiré du
+  déploiement), CSS compilé de `/fr` sans référence au motif, `/en` et `/ar` toujours 200,
+  `dir="rtl"` toujours correct sur `/ar`, boutons Connexion/Inscription toujours réellement
+  `disabled`, illustration du cintre (`listings-hanger.svg`) toujours servie normalement.
+  - **Non vérifié par l'agent** (nécessite un navigateur réel) : confirmation visuelle humaine
+    de l'absence du motif sur ordinateur et téléphone dans les trois langues, et capture
+    d'écran après correction demandées par le ticket.
+- **Commit** : `83c894a` (vetement-front).
+- **Travail restant** : confirmation visuelle humaine et capture d'écran (voir ci-dessus) ; le
+  reste du périmètre COR-006 est livré.
