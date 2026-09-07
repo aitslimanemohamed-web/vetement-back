@@ -27,9 +27,10 @@ describe('HealthController', () => {
     expect(typeof result.version).toBe('string');
   });
 
-  it('falls back to safe defaults when env vars are not set', () => {
+  it('falls back to safe defaults when no env var is set', () => {
     delete process.env.APP_ENVIRONMENT;
     delete process.env.APP_VERSION;
+    delete process.env.RENDER_GIT_COMMIT;
 
     const result = controller.getHealth();
 
@@ -38,6 +39,7 @@ describe('HealthController', () => {
   });
 
   it('reflects APP_ENVIRONMENT and APP_VERSION when set', () => {
+    delete process.env.RENDER_GIT_COMMIT;
     process.env.APP_ENVIRONMENT = 'test';
     process.env.APP_VERSION = 'abc1234';
 
@@ -45,5 +47,14 @@ describe('HealthController', () => {
 
     expect(result.environment).toBe('test');
     expect(result.version).toBe('abc1234');
+  });
+
+  it('prefers RENDER_GIT_COMMIT over APP_VERSION, truncated to a short SHA', () => {
+    process.env.APP_VERSION = 'manual-override';
+    process.env.RENDER_GIT_COMMIT = 'abcdef0123456789';
+
+    const result = controller.getHealth();
+
+    expect(result.version).toBe('abcdef0');
   });
 });
