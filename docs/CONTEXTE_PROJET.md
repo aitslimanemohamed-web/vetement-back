@@ -237,6 +237,9 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
 - **US-004** — Page d'accueil publique trilingue (français/anglais/arabe) livrée à la place de
   l'ancienne page de garde technique, laquelle est déplacée sur `/<langue>/diagnostic` (toujours
   fonctionnelle, toujours `noindex`). Détail complet en journal ci-dessous.
+- **COR-005** — Palette de l'accueil corrigée (thème clair forcé, contrastes mesurés ≥ 4,5:1,
+  associations vert/doré supprimées) et les deux illustrations de vêtements remplacées par des
+  SVG originaux plus sobres. Détail complet en journal ci-dessous.
 
 **Prévu (pas commencé) :**
 - Conception de la base de données.
@@ -312,6 +315,8 @@ CI (section D, sous-section Hébergement).
 | 2026-09-07 | **next-intl** ajouté comme dépendance pour le routage et les traductions (US-004) | Bibliothèque de référence pour l'App Router de Next.js ; couvre nativement le routage par langue, la persistance par cookie et le rendu RTL exigés par le ticket. |
 | 2026-09-07 | Nom de marque « **Vetement** » utilisé à titre **provisoire** sur la page publique (US-004) | Aucun nom de marque définitif n'existait dans le contexte au moment du ticket ; réutilise le nom déjà choisi pour les dépôts (section G, décision du nom de projet). À remplacer si une marque définitive est validée plus tard. |
 | 2026-09-07 | Une seule police (Cairo, via `next/font/google`) pour tout le site, latin et arabe | Évite un changement de police perceptible (et le décalage de mise en page associé) lors du changement de langue ; auto-hébergée au build, sans dépendance réseau externe à l'exécution. |
+| 2026-09-07 | Thème **clair forcé** sur l'accueil pour cette version, y compris quand le système est en mode sombre (`color-scheme: light`, plus de bloc `@media (prefers-color-scheme: dark)`) | Demandé explicitement par l'utilisateur (COR-005) après un rendu jugé trop sombre sur téléphone. Origine identifiée par vérification directe du code (pas supposée) : uniquement un bloc CSS `@media (prefers-color-scheme: dark)` dans `src/styles/tokens.css` — aucun mécanisme JavaScript, aucun attribut `data-theme` n'existe dans ce projet. |
+| 2026-09-07 | Nouvelle palette claire (vert `#006233`/`#004d28`, blanc cassé `#f8faf9`, vert très pâle `#eaf4ee`, rouge `#c62828` ponctuel, gris `#d8e2dc`) remplace l'ancienne palette sable/doré | Corrige les associations vert-sur-doré peu lisibles signalées par l'utilisateur ; contrastes mesurés (voir section H, COR-005) : minimum 5,36:1 sur les paires texte/fond réellement utilisées, objectif ≥ 4,5:1 tenu. |
 
 ### Questions ouvertes (aucune solution proposée ici ne vaut décision)
 
@@ -478,3 +483,78 @@ CI (section D, sous-section Hébergement).
 - **Commit** : `515cdac` (vetement-front).
 - **Travail restant** : vérification visuelle multi-largeurs et captures d'écran (voir
   ci-dessus) ; le reste du périmètre US-004 est livré.
+
+### 2026-09-07 — COR-005 — Couleurs, contrastes et illustrations de l'accueil
+
+- **Correction demandée par l'utilisateur** : rendu de l'accueil jugé trop sombre et peu
+  lisible sur téléphone (badges vert sur fond doré, boutons désactivés estompés), et grande
+  illustration de vêtements jugée peu moderne (tunique/pantalon sur un large disque).
+- **Dépôt concerné** : vetement-front uniquement (aucune modification back-end, comme prévu).
+- **Origine des couleurs sombres — vérifiée avant toute correction, pas supposée** : lecture
+  directe du code a confirmé un unique mécanisme, `@media (prefers-color-scheme: dark)` dans
+  `src/styles/tokens.css` (redéfinissant les variables de couleur) combiné à
+  `color-scheme: dark` dans `src/app/globals.css` (couleurs des contrôles natifs du
+  navigateur). Aucun thème JavaScript, aucun attribut `data-theme`, aucune extension tierce
+  identifiable dans le code n'intervient. La page technique `/<langue>/diagnostic` conserve
+  son propre mode sombre indépendant (hors périmètre de ce ticket, non touché).
+- **Résultat réalisé et vérifié** :
+  - Nouvelle palette centralisée dans `src/styles/tokens.css` (seul emplacement des couleurs ;
+    aucune couleur codée en dur dans les composants) : voir la table de décision en section G
+    pour les valeurs exactes. Bloc sombre supprimé — le thème clair s'applique désormais que le
+    système soit clair ou sombre. `color-scheme: light` forcé dans `globals.css`, sans modifier
+    aucun réglage du navigateur de la personne qui visite le site.
+  - Toutes les associations vert-sur-doré corrigées : badge « La seconde main en Algérie »
+    (`Hero.module.css`), badge « Version de test » (`Footer.module.css`, fond passé au blanc
+    pour rester visible sur le pied de page désormais vert très pâle), numéros des étapes
+    « Comment ça marche ? » (`HowItWorks.module.css`), langue sélectionnée
+    (`LanguageSwitcher.module.css`, texte vert foncé + soulignement conservé comme repère). Les
+    liens (« Comment ça marche ? » de l'en-tête, « Retour en haut » du pied de page) passent au
+    vert foncé.
+  - Boutons Connexion/Inscription (`DisabledActionButton.module.css`) : suppression de la
+    réduction d'opacité globale (qui délavait le texte en même temps que le fond, cassant son
+    propre contraste) au profit de couleurs dédiées à l'état désactivé (fond gris clair du
+    thème + texte gris soutenu) — légende « Bientôt disponible » inchangée, toujours visible
+    sans survol.
+  - Deux illustrations SVG entièrement redessinées (`public/images/hero-clothing.svg`,
+    `public/images/listings-hanger.svg`), **originales, créées pour ce projet** (aucun asset
+    externe, aucune photographie, aucun logo tiers) : un vêtement sur cintre au premier plan
+    avec une seconde pièce légèrement en arrière-plan, proportions simples et contours nets,
+    fond transparent (plus de grand disque opaque), petite touche de rouge ponctuelle. Le
+    pictogramme des annonces reprend la même famille graphique (même épaisseur de trait, même
+    palette, fond très pâle), sans plus aucune couleur dorée. Motif géométrique décoratif
+    (`algerian-pattern.svg`) recoloré pour rester cohérent avec la nouvelle palette.
+  - Illustration principale réduite sur téléphone (largeur ramenée à 55 %, 220px max contre
+    320px avant) pour ne plus occuper l'essentiel de la hauteur d'écran, comme demandé.
+- **Contrastes mesurés (calcul WCAG réel, formule de luminance relative, pas une estimation
+  visuelle)** — objectif du ticket : ≥ 4,5:1 :
+
+  | Paire | Contraste |
+  |---|---|
+  | Texte vert foncé `#004d28` sur vert très pâle `#eaf4ee` (badges, langue active) | 8,93:1 |
+  | Titres `#17231d` sur fond `#f8faf9` / cartes blanches | 15,47:1 / 16,22:1 |
+  | Texte secondaire `#4b5c52` sur fond `#f8faf9` / blanc | 6,79:1 / 7,11:1 |
+  | Texte blanc sur bouton vert actif `#006233` / survol `#004d28` | 7,51:1 / 10,04:1 |
+  | Liens verts foncés `#004d28` sur blanc / fond | 10,04:1 / 9,58:1 |
+  | Bouton désactivé « primary » : texte `#4b5c52` sur fond `#d8e2dc` | 5,36:1 |
+  | Bouton désactivé « secondary » : texte `#4b5c52` sur blanc (fond transparent) | 7,11:1 |
+
+  Toutes les paires dépassent l'objectif de 4,5:1 ; la plus proche (bouton désactivé
+  « primary ») reste à 5,36:1.
+- **Vérifications effectuées** : `npm run type-check`, `npm run lint` (0 erreur, mêmes 2
+  avertissements bénins déjà connus sur l'usage de `<img>`), `npm test` (6 tests existants
+  toujours verts, comportement inchangé), `npm run build`. Recherche explicite de résidus de
+  l'ancienne palette (`grep` sur le CSS compilé, local puis en ligne) : aucun. Vérification
+  réelle en local (serveur construit) puis en ligne sur Vercel après déploiement : CSS compilé
+  contient bien la nouvelle palette et `color-scheme: light`, aucun bloc
+  `prefers-color-scheme` restant pour l'accueil, redirection de langue, RTL arabe, page
+  `/fr/diagnostic`, `robots.txt` et boutons désactivés tous inchangés et fonctionnels.
+  - **Non vérifié par l'agent** (nécessite un navigateur réel avec contrôle visuel humain, hors
+    de portée des outils disponibles) : rendu visuel effectif aux largeurs 360/390/768/1440 px,
+    apparence réelle avec le système en mode sombre sur un vrai téléphone, captures d'écran
+    ordinateur/téléphone (dont une version mobile en arabe) demandées par le ticket. Les calculs
+    de contraste ci-dessus sont réels (formule WCAG appliquée aux couleurs effectivement
+    utilisées dans le CSS compilé), mais ne remplacent pas un contrôle visuel humain sur
+    appareil réel.
+- **Commit** : `3bb8e3e` (vetement-front).
+- **Travail restant** : captures d'écran et contrôle visuel humain multi-appareils (voir
+  ci-dessus) ; le reste du périmètre COR-005 est livré.
