@@ -26,3 +26,12 @@ Restent à définir : les technologies utilisées et l'hébergement.
 ## Dossier `database/`
 
 Voir [`database/README.md`](database/README.md) pour le rôle de ce dossier.
+
+## Mémoire de référence du projet
+
+L'ensemble du projet (les deux dépôts) est documenté dans
+[`docs/CONTEXTE_PROJET.md`](docs/CONTEXTE_PROJET.md) — c'est la version de référence unique,
+versionnée dans ce dépôt.
+
+**Lire ce fichier avant de commencer une intervention**, et **le mettre à jour à la fin du
+travail** si l'intervention en modifie le contenu.

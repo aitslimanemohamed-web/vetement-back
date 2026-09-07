@@ -7,6 +7,15 @@ indépendant du dépôt **vetement-front** (interface web/mobile) : les deux dé
 propre historique Git et leur propre dépôt GitHub. Ne jamais supposer un accès direct au code du
 front-end depuis ce dépôt.
 
+## Mémoire de référence du projet
+
+Le contexte complet du projet (les deux dépôts) est documenté dans
+[`docs/CONTEXTE_PROJET.md`](docs/CONTEXTE_PROJET.md) — la version de référence unique.
+
+**Lire ce fichier avant toute intervention.** À la fin du travail, mettre à jour les sections
+concernées (réalisations, décisions, configuration, vérifications, blocages, prochaines
+étapes, journal des interventions) si l'intervention en modifie le contenu.
+
 ## Avant de travailler
 
 Toujours lire le ticket concerné avant de commencer un travail dans ce dépôt. Ne pas déduire le
