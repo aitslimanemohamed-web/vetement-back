@@ -1,0 +1,37 @@
+# Secrets et configuration locale sensible
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+secrets/
+
+# Autoriser explicitement les exemples sans secret
+!.env.example
+
+# Base de données : jamais de données réelles, sauvegardes ou identifiants
+database/*.sql
+database/*.dump
+database/*.sqlite
+database/*.sqlite3
+database/backups/
+
+# Photos des annonces : jamais versionnées
+uploads/
+media/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Fichiers d'éditeur/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Fichiers temporaires
+*.log
+*.tmp
+*.bak
