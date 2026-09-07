@@ -52,7 +52,11 @@ Android. Interface prévue en français, arabe et anglais.
   fonctions d'administration.
 
 **Points restant à définir** (ne pas les considérer comme tranchés) :
-- Méthode(s) d'authentification (email/mot de passe, réseaux sociaux, téléphone... — à définir).
+- Méthode(s) d'authentification côté back-end (stockage des identifiants, hachage, sessions/jetons
+  — à définir). Côté interface uniquement, l'inscription (US-007) utilise **nom d'utilisateur +
+  mot de passe** (pas d'e-mail, de téléphone, ni de connexion Google/Apple) — ce choix
+  d'interface ne préjuge pas du mécanisme d'authentification réel, qui reste à concevoir côté
+  back-end.
 - Recherche : rayons de recherche géographique et fonctions de filtrage/recherche exactes.
 - Règles détaillées de réservation (durée exacte d'expiration, comportement en cas de refus...).
 - Options exactes de visibilité de la localisation d'un utilisateur/d'une annonce.
@@ -243,12 +247,21 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
 - **COR-006** — Motif de fond étoilé (`algerian-pattern.svg`) retiré et supprimé du projet,
   remplacé par un fond uni clair. Règle graphique correspondante ajoutée en section G. Détail
   complet en journal ci-dessous.
+- **US-007** — Page d'inscription (`/<langue>/inscription`) avec validation entièrement locale
+  (nom d'utilisateur, mot de passe, confirmation), atteignable depuis le bouton Inscription de
+  l'accueil désormais activé. Aucun compte réellement créé, aucun appel réseau. Détail complet
+  en journal ci-dessous.
 
 **Prévu (pas commencé) :**
 - Conception de la base de données.
-- Choix de la méthode d'authentification.
+- Back-end d'authentification réel (réception et vérification des identifiants, hachage du mot
+  de passe, création de session/jeton, stockage) — l'interface d'inscription existe (US-007)
+  mais ne parle à aucun serveur.
+- Vérification de la disponibilité d'un nom d'utilisateur (nécessite le back-end).
+- Récupération de compte sans e-mail ni téléphone (voir question ouverte, section G).
+- Page de connexion (le bouton Connexion reste désactivé en attendant).
 - Choix du stockage des photos.
-- Tout développement fonctionnel (annonces, comptes, messagerie...).
+- Tout développement fonctionnel (annonces, messagerie...).
 - Pages légales/contact et activation du référencement public (hors périmètre de
   l'environnement de test actuel).
 - Nom de marque définitif (« Vetement » reste provisoire — voir section G).
@@ -321,6 +334,8 @@ CI (section D, sous-section Hébergement).
 | 2026-09-07 | Thème **clair forcé** sur l'accueil pour cette version, y compris quand le système est en mode sombre (`color-scheme: light`, plus de bloc `@media (prefers-color-scheme: dark)`) | Demandé explicitement par l'utilisateur (COR-005) après un rendu jugé trop sombre sur téléphone. Origine identifiée par vérification directe du code (pas supposée) : uniquement un bloc CSS `@media (prefers-color-scheme: dark)` dans `src/styles/tokens.css` — aucun mécanisme JavaScript, aucun attribut `data-theme` n'existe dans ce projet. |
 | 2026-09-07 | Nouvelle palette claire (vert `#006233`/`#004d28`, blanc cassé `#f8faf9`, vert très pâle `#eaf4ee`, rouge `#c62828` ponctuel, gris `#d8e2dc`) remplace l'ancienne palette sable/doré | Corrige les associations vert-sur-doré peu lisibles signalées par l'utilisateur ; contrastes mesurés (voir section H, COR-005) : minimum 5,36:1 sur les paires texte/fond réellement utilisées, objectif ≥ 4,5:1 tenu. |
 | 2026-09-07 | Motifs géométriques répétés (étoiles) retirés des fonds de section, remplacés par des fonds unis | Demandé explicitement par l'utilisateur (COR-006) — voir la règle graphique ci-dessous, qui remplace la décision TECH-003/US-004 d'utiliser un motif géométrique décoratif inspiré du zellige. |
+| 2026-09-07 | Inscription (US-007) : **nom d'utilisateur + mot de passe** uniquement, pas d'e-mail/téléphone/connexion tierce | Choix explicite du ticket US-007. Politique du mot de passe (15-128 caractères, pas de composition imposée) alignée sur la [recommandation OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) citée par le ticket, privilégiant la longueur sans second facteur. |
+| 2026-09-07 | Comptage des caractères par **grappe de graphèmes Unicode** (`Intl.Segmenter`, repli sur `Array.from`) pour les limites de longueur du nom d'utilisateur et du mot de passe | Une lettre de base + une marque diacritique combinante (voyellation arabe, accent latin décomposé) doit compter comme un seul caractère pour l'utilisateur ; à reproduire à l'identique côté back-end pour que les deux validations restent cohérentes. |
 
 ### Règle graphique à mémoriser (COR-006, 2026-09-07)
 
@@ -338,7 +353,13 @@ explicite de l'utilisateur.
 
 ### Questions ouvertes (aucune solution proposée ici ne vaut décision)
 
-- Quel système d'authentification ?
+- Quel mécanisme d'authentification côté back-end (stockage, hachage, sessions/jetons) ?
+  L'interface (nom d'utilisateur + mot de passe) est fixée par US-007, pas le back-end.
+- **Comment récupérer un compte sans e-mail ni téléphone ?** (soulevée explicitement par
+  US-007, aucune réponse proposée à ce stade — à trancher avant le ticket back-end
+  d'authentification).
+- Comment vérifier la disponibilité d'un nom d'utilisateur (nécessite un back-end ; US-007
+  affiche volontairement une aide de format mais jamais « Nom disponible »).
 - Quel hébergement pour la base de données et le stockage des photos (hors périmètre TECH-003) ?
 - Quelle durée exacte avant expiration d'une réservation ?
 - Quels rayons/filtres de recherche géographique exacts ?
@@ -613,3 +634,92 @@ explicite de l'utilisateur.
 - **Commit** : `83c894a` (vetement-front).
 - **Travail restant** : confirmation visuelle humaine et capture d'écran (voir ci-dessus) ; le
   reste du périmètre COR-006 est livré.
+
+### 2026-09-07 — US-007 — Page d'inscription (validation locale, sans back-end)
+
+- **Dépôt concerné** : vetement-front uniquement — aucun appel réseau, donc aucune modification
+  back-end, conformément au ticket.
+- **Résultat réalisé et vérifié** :
+  - Route `/<langue>/inscription` (`/fr`, `/en`, `/ar`), ouvrable directement et par
+    actualisation, avec sa propre traduction complète et son propre titre de page.
+  - Bouton **Inscription** de l'accueil activé (`Header.tsx`) : c'est désormais un vrai lien
+    vers cette page dans la langue courante, sans mention « Bientôt disponible ». Le bouton
+    **Connexion** reste désactivé — sa page n'existe pas dans ce ticket.
+  - Organisation en `src/features/auth/registration/` : `validation.ts` (règles pures, sans
+    JSX, réutilisables/documentées pour le futur back-end), `PasswordField.tsx` (champ mot de
+    passe réutilisable avec bouton afficher/masquer accessible, `type="button"`),
+    `RegistrationForm.tsx` (assemble les 3 champs et gère la soumission). Un `AuthHeader.tsx`
+    dédié (logo, sélecteur de langue, retour à l'accueil) remplace le `Header` marketing complet
+    sur cette page — pensé pour être réutilisé par la future page de connexion.
+  - **Nom d'utilisateur** : 3 à 30 caractères (voir méthode de comptage ci-dessous), lettres
+    Unicode (latines accentuées, arabes) + marques diacritiques + chiffres + tiret/tiret bas,
+    aucun espace interne accepté, espaces de début/fin ignorés pour la validation uniquement
+    (la valeur affichée n'est jamais modifiée). `spellcheck` et mise en majuscule automatique
+    désactivés, `autocomplete="username"`, aide de format toujours visible. Aucune vérification
+    de disponibilité — jamais de message « Nom disponible » (question ouverte, section G).
+  - **Mot de passe** : 15 à 128 caractères, espaces/Unicode/symboles autorisés, aucune règle de
+    composition imposée, aucun `maxLength` (pas de troncature silencieuse), aucun trim. Collage
+    et gestionnaires de mots de passe fonctionnels, `autocomplete="new-password"`. Bouton
+    afficher/masquer dédié, accessible au clavier.
+  - **Confirmation** : doit correspondre exactement (espaces et casse compris), recalculée en
+    direct si le mot de passe change (les erreurs sont dérivées à chaque rendu, pas mises en
+    cache), son propre bouton afficher/masquer.
+  - **Comptage des caractères** : `countCharacters()` dans `validation.ts` utilise
+    `Intl.Segmenter` (grappes de graphèmes), pas `.length` (unités UTF-16) ni un simple
+    `Array.from` (points de code seuls) — une lettre de base + une marque diacritique combinante
+    (voyellation arabe, accent latin décomposé) compte pour UN caractère. Repli sur
+    `Array.from` si `Intl.Segmenter` est indisponible. Méthode documentée dans le code et à
+    reproduire à l'identique côté back-end (voir décision, section G).
+  - **Validation et messages** : aucune erreur à l'ouverture d'un formulaire vide ; une erreur
+    apparaît après la sortie d'un champ (`onBlur`) ou une tentative de soumission, puis se met
+    à jour en direct pendant la correction (les erreurs sont recalculées à chaque rendu à partir
+    des valeurs courantes). Les 8 messages français du ticket sont repris mot pour mot ;
+    traductions anglaise et arabe propres (pas de traduction automatique brute).
+  - **Soumission** : le bouton « S'inscrire » reste actif même formulaire incomplet (sert à
+    déclencher les erreurs) ; `preventDefault` empêche tout rechargement ; en cas d'erreur, le
+    focus va sur le premier champ invalide dans l'ordre nom → mot de passe → confirmation ; si
+    tout est valide, un message local (`role="status"`, `aria-live="polite"`) apparaît : « Le
+    formulaire est valide. La création de compte sera disponible prochainement. Aucun compte
+    n'a été créé. » — jamais « Inscription réussie », aucune session simulée, aucune
+    redirection. Les deux champs de mot de passe sont effacés juste après (le nom d'utilisateur
+    est conservé).
+  - **Aucune valeur transmise nulle part** : aucun `fetch`, Server Action ou appel API dans tout
+    le composant — vérifié par lecture du code ET par un test qui espionne `globalThis.fetch`
+    et vérifie qu'il n'est jamais appelé après une soumission valide. Aucune valeur écrite dans
+    l'URL, un cookie, `localStorage`/`sessionStorage`, la console ou un outil d'analyse (aucun
+    de ces mécanismes n'existe dans le composant).
+  - **« Déjà un compte ? Se connecter »** : reste une action désactivée (réutilise
+    `DisabledActionButton`) avec la légende « Bientôt disponible » traduite — pas de lien mort,
+    la page de connexion n'existe pas encore.
+  - **Retour à l'accueil** : le logo et le lien dédié de `AuthHeader` ouvrent explicitement
+    l'accueil dans la langue courante, y compris quand l'inscription a été ouverte directement.
+  - **Accessibilité** : libellés associés (`htmlFor`/`id`), `aria-invalid` sur les champs en
+    erreur, erreurs reliées par `aria-describedby`, focus visible (règle globale existante),
+    aucune erreur signalée uniquement par la couleur (un texte d'erreur accompagne toujours la
+    bordure rouge). Champ nom d'utilisateur en `dir="auto"` pour s'adapter au contenu arabe ou
+    latin saisi. RTL vérifié sur `/ar/inscription` (`dir="rtl"` sur `<html>`).
+- **Tests et vérifications effectués (tous réussis)** :
+  - Nouveaux tests : `validation.test.ts` (règles pures : comptage par grappes de graphèmes sur
+    un exemple arabe et un exemple latin décomposé, longueurs limites 3/30 et 15/128, espace
+    interne rejeté, espaces de bord ignorés, correspondance de confirmation) et
+    `RegistrationForm.test.tsx` (aucune erreur au chargement, erreur après `blur`, erreurs +
+    focus au premier champ invalide sur soumission vide, mot de passe trop court, confirmation
+    invalide puis re-validée en direct après correction du mot de passe, bascule
+    afficher/masquer, message de succès + champs mot de passe vidés + `fetch` jamais appelé,
+    action « Se connecter » toujours désactivée). 38 tests au total, tous verts.
+  - `npm run type-check`, `npm run lint` (0 erreur), `npm run build` (route générée pour les 3
+    langues) — tous réussis localement.
+  - Vérification réelle en ligne après déploiement Vercel : `/fr`, `/en`, `/ar/inscription`
+    répondent 200, `dir="rtl"` correct sur `/ar`, titres traduits, lien Inscription de l'accueil
+    pointe réellement vers `/fr/inscription`, bouton Connexion toujours désactivé partout,
+    `autocomplete="new-password"` présent sur les deux champs de mot de passe, `robots.txt`
+    toujours `Disallow: /`.
+  - **Non vérifié par l'agent** (nécessite un navigateur réel avec contrôle visuel/tactile
+    humain, hors de portée des outils disponibles) : affichage réel sur ordinateur et téléphone,
+    captures d'écran demandées par le ticket, navigation clavier complète à la main (Tab/Entrée)
+    sur un vrai clavier physique.
+- **Commit** : `5c19e54` (fonctionnalité), `5d82345` (README) — vetement-front.
+- **Travail restant** : contrôle visuel humain et captures d'écran (voir ci-dessus) ; le reste
+  du périmètre US-007 est livré. Rappel explicite : l'inscription n'est connectée à aucun
+  back-end — un futur ticket devra créer le service d'authentification réel, la vérification de
+  disponibilité du nom d'utilisateur, la récupération de compte, et la page de connexion.
