@@ -8,12 +8,12 @@ aux données.
 ## Dépôt lié
 
 Le front-end (site web, applications iOS et Android) vit dans un dépôt séparé et indépendant :
-**vetement-front** (lien à compléter une fois le dépôt front-end créé).
+[**vetement-front**](https://github.com/aitslimanemohamed-web/vetement-front).
 
 ## Récupérer ce dépôt
 
 ```
-git clone <url-du-depot-vetement-back>
+git clone https://github.com/aitslimanemohamed-web/vetement-back.git
 ```
 
 ## État actuel
