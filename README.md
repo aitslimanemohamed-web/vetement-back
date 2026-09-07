@@ -46,11 +46,11 @@ ni de stockage à vérifier, aucun n'existe encore) :
 ## État actuel
 
 Le serveur démarre, expose `GET /api/health`, et autorise les appels du front-end via CORS
-(origine configurable). Aucune fonctionnalité métier (annonces, comptes, messagerie...)
-n'existe encore — voir le fichier de référence pour le détail exact de ce qui est réalisé,
-prévu ou bloqué.
-
-Restent à définir : l'hébergement définitif.
+(origine configurable). Déployé et vérifié en ligne (Render, plan gratuit) :
+https://vetement-back.onrender.com/api/health — voir `docs/CONTEXTE_PROJET.md` pour le détail
+et les limites connues (mise en veille après inactivité). Aucune fonctionnalité métier
+(annonces, comptes, messagerie...) n'existe encore — voir le fichier de référence pour le
+détail exact de ce qui est réalisé, prévu ou bloqué.
 
 ## Dossier `database/`
 

@@ -86,9 +86,13 @@ déploiement effectif dépend du choix d'hébergement, non encore validé — vo
 - `vetement-back/database/` — dossier prévu pour les futurs fichiers de structure et
   d'évolution de la base de données. Vide de tout fichier de structure à ce jour (contient
   uniquement `database/README.md`).
-- `vetement-front/src/app/` — code de l'application Next.js (page de garde, composants,
-  configuration `robots.ts`). `vetement-front/.github/workflows/ci.yml` — vérifications
-  automatiques (voir section E).
+- `vetement-front/src/app/[locale]/` — routes Next.js par langue (page d'accueil publique,
+  page de diagnostic technique) ; `vetement-front/src/i18n/`, `src/messages/` — configuration et
+  textes des langues (fr/en/ar) ; `vetement-front/src/components/`, `src/features/home/` —
+  composants d'interface (en-tête, pied de page, sections de la page d'accueil) ;
+  `vetement-front/src/proxy.ts` — détection de langue et redirection (convention Next.js 16) ;
+  `vetement-front/public/images/` — illustrations SVG originales du projet.
+  `vetement-front/.github/workflows/ci.yml` — vérifications automatiques (voir section E).
 - `vetement-back/src/` — code de l'application NestJS (module `health/` exposant
   `GET /api/health`). `vetement-back/.github/workflows/ci.yml` — vérifications automatiques.
 
@@ -145,16 +149,38 @@ Informations vérifiées le **2026-09-07**.
 
 | Composant | Rôle prévu | État |
 |---|---|---|
-| Front-end web | Next.js 16 + TypeScript — page de garde + zone de diagnostic | **Créé, fonctionne en local** ; pas encore déployé en ligne |
+| Front-end web | Next.js 16 + TypeScript, page d'accueil publique trilingue (US-004) + zone de diagnostic | **Déployé et vérifié en ligne** : https://vetement-front.vercel.app |
 | Front-end mobile (iOS/Android) | Applications mobiles | Reporté (hors périmètre MVP) |
-| Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Créé, fonctionne en local** ; pas encore déployé en ligne |
-| Base de données | Stockage des annonces, utilisateurs, messages... | Non créée (non nécessaire pour TECH-003) |
+| Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Déployé et vérifié en ligne** : https://vetement-back.onrender.com/api/health |
+| Base de données | Stockage des annonces, utilisateurs, messages... | Non créée (non nécessaire pour le périmètre actuel) |
 | Authentification | Vérification d'identité des utilisateurs | Non créée — méthode non choisie |
 | Stockage des photos | Hébergement des photos d'annonces | Non créé |
-| Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Non créé — fournisseur non validé** (voir journal TECH-003 : proposition présentée, en attente de décision utilisateur, notamment sur le coût) |
+| Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Créé et vérifié** — voir sous-section « Hébergement » ci-dessous |
 
 Aucune adresse, aucun fournisseur d'hébergement et aucune configuration ne sont inventés ici :
 tant qu'un composant n'a pas été réellement mis en place et vérifié, il reste "Non créé".
+
+### Hébergement (validé par l'utilisateur le 2026-09-07)
+
+| Service | Fournisseur | Adresse | Coût | Limite connue |
+|---|---|---|---|---|
+| Front-end | Vercel (plan gratuit, intégration Git native) | https://vetement-front.vercel.app | 0 € | — |
+| Back-end | Render (plan gratuit, "Web Service") | https://vetement-back.onrender.com | 0 € | **Mise en veille après inactivité** : la première requête après une période sans trafic subit un démarrage à froid (~30–60 s) avant de répondre. |
+
+- Déploiement automatique natif de chaque plateforme sur push vers `main` (pas d'étape de
+  déploiement ajoutée dans les workflows GitHub Actions — voir section F).
+- Variables d'environnement réelles configurées directement dans les dashboards Vercel/Render
+  (jamais commitées) : `NEXT_PUBLIC_API_URL` (front, pointe vers l'API Render) ; `CORS_ORIGIN`
+  (back, pointe vers l'URL Vercel réelle), `APP_ENVIRONMENT=test`.
+- Vérifié réellement (pas seulement supposé) : `GET /api/health` répond en HTTPS avec le commit
+  back déployé ; le front répond en HTTPS et sa zone de diagnostic confirme la communication
+  avec le back (CORS accepté pour l'origine Vercel réelle, refusé pour toute autre origine).
+- **Incident réel rencontré et corrigé** : une variable d'environnement Render mal nommée
+  (`PP_ENVIRONMENT` au lieu de `APP_ENVIRONMENT`) faisait retomber silencieusement l'API sur la
+  valeur par défaut `development` au lieu de `test` — diagnostiqué par appel direct à l'API
+  (pas par supposition), corrigé en renommant la variable côté Render.
+- Version de commit affichée automatiquement à chaque déploiement, sans étape manuelle :
+  `RENDER_GIT_COMMIT` (back) / `VERCEL_GIT_COMMIT_SHA` (front), tronqués à 7 caractères.
 
 ### Versions réellement installées (vérifié le 2026-09-07)
 
@@ -168,6 +194,8 @@ tant qu'un composant n'a pas été réellement mis en place et vérifié, il res
 | NestJS (`@nestjs/core`) | ^12.0.1 |
 | TypeScript (back) | ^6.0.2 |
 | Vitest (tests back) | ^4.1.2 |
+| next-intl (routage/traductions front, US-004) | ^4.14.2 |
+| Vitest + Testing Library (tests front, US-004) | vitest ^4.1.11, @testing-library/react ^16.3.3 |
 
 **Limite connue** : Node v23 n'est pas une version LTS ; `npm warn EBADENGINE` apparaît lors de
 l'installation pour quelques dépendances qui préfèrent Node 20/22/24 LTS. Aucune erreur
@@ -201,26 +229,26 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
     autorisée et silencieux (sans en-tête `Access-Control-Allow-Origin`) pour une origine non
     autorisée, `GET /api/health` renvoie bien le commit/environnement passés en variables.
   - Workflows GitHub Actions (`.github/workflows/ci.yml`) ajoutés sur les deux dépôts :
-    installation + vérifications + construction sur chaque push/PR vers `main`. **Ne contiennent
-    pas encore d'étape de déploiement.**
-
-**En cours / en attente de décision utilisateur :**
-- **TECH-003, partie hébergement et déploiement** — **non réalisée.** Le ticket exige une
-  validation explicite du fournisseur d'hébergement et de tout engagement financier avant
-  création de services externes ; cette validation n'a pas encore été obtenue au moment de la
-  rédaction. Tant que ce point n'est pas tranché : pas d'adresse HTTPS publique, pas de
-  déploiement automatique réel, pas de démonstration "depuis un téléphone" possible.
+    installation + vérifications + construction sur chaque push/PR vers `main`.
+- **TECH-003, partie hébergement et déploiement** — Vercel (front) et Render (back) créés,
+  validés par l'utilisateur (fournisseur et coût, 0 €), déployés et vérifiés en HTTPS réel (voir
+  section D, sous-section Hébergement, et journal ci-dessous). Déploiement automatique natif de
+  chaque plateforme confirmé sur push vers `main`.
+- **US-004** — Page d'accueil publique trilingue (français/anglais/arabe) livrée à la place de
+  l'ancienne page de garde technique, laquelle est déplacée sur `/<langue>/diagnostic` (toujours
+  fonctionnelle, toujours `noindex`). Détail complet en journal ci-dessous.
 
 **Prévu (pas commencé) :**
 - Conception de la base de données.
 - Choix de la méthode d'authentification.
 - Choix du stockage des photos.
-- Étape de déploiement des workflows CI (dépend du choix d'hébergement).
 - Tout développement fonctionnel (annonces, comptes, messagerie...).
+- Pages légales/contact et activation du référencement public (hors périmètre de
+  l'environnement de test actuel).
+- Nom de marque définitif (« Vetement » reste provisoire — voir section G).
 
 **Bloqué :**
-- Hébergement/déploiement de TECH-003 — en attente de validation utilisateur (fournisseur +
-  coût). Voir livraison de l'intervention TECH-003 pour la proposition soumise.
+- Aucun blocage actif au moment de la rédaction.
 
 ## F. Reprise du travail
 
@@ -245,6 +273,7 @@ npm install
 npm run dev          # développement local, http://localhost:3000
 npm run type-check
 npm run lint
+npm test              # tests ciblés (sélecteur de langue, actions désactivées)
 npm run build
 npm run start         # démarre la version construite
 ```
@@ -261,8 +290,9 @@ npm run build
 npm run start:prod    # démarre dist/main.js
 ```
 
-**Aucune commande de déploiement n'existe à ce jour** — l'hébergement n'est pas encore
-choisi/validé (section D, E).
+**Déploiement** : automatique, natif à chaque plateforme (Vercel pour le front, Render pour le
+back) sur push vers `main` — aucune commande manuelle, aucune étape ajoutée dans les workflows
+CI (section D, sous-section Hébergement).
 
 ## G. Décisions et questions ouvertes
 
@@ -278,11 +308,13 @@ choisi/validé (section D, E).
 | 2026-09-07 | MVP limité au site web responsive ; applications mobiles reportées | Choix technique confirmé dans le ticket TECH-003. |
 | 2026-09-07 | Front-end : Next.js + TypeScript. Back-end : NestJS + TypeScript sur Node.js, organisé en modules | Choix technique confirmé dans le ticket TECH-003. |
 | 2026-09-07 | Pas de base de données pour le périmètre TECH-003 | Choix technique confirmé dans le ticket TECH-003. |
+| 2026-09-07 | Hébergement : **Vercel** (front, gratuit) + **Render** (back, plan gratuit) | Validé explicitement par l'utilisateur après proposition (coût 0 €, limite de mise en veille du plan gratuit Render acceptée en connaissance de cause). |
+| 2026-09-07 | **next-intl** ajouté comme dépendance pour le routage et les traductions (US-004) | Bibliothèque de référence pour l'App Router de Next.js ; couvre nativement le routage par langue, la persistance par cookie et le rendu RTL exigés par le ticket. |
+| 2026-09-07 | Nom de marque « **Vetement** » utilisé à titre **provisoire** sur la page publique (US-004) | Aucun nom de marque définitif n'existait dans le contexte au moment du ticket ; réutilise le nom déjà choisi pour les dépôts (section G, décision du nom de projet). À remplacer si une marque définitive est validée plus tard. |
+| 2026-09-07 | Une seule police (Cairo, via `next/font/google`) pour tout le site, latin et arabe | Évite un changement de police perceptible (et le décalage de mise en page associé) lors du changement de langue ; auto-hébergée au build, sans dépendance réseau externe à l'exécution. |
 
 ### Questions ouvertes (aucune solution proposée ici ne vaut décision)
 
-- **Quel hébergement pour le front-end et le back-end de l'environnement de test ?** (bloquant
-  pour terminer TECH-003 — proposition soumise, en attente de validation, voir journal H)
 - Quel système d'authentification ?
 - Quel hébergement pour la base de données et le stockage des photos (hors périmètre TECH-003) ?
 - Quelle durée exacte avant expiration d'une réservation ?
@@ -365,14 +397,84 @@ choisi/validé (section D, E).
   `type-check`, `lint`, `test`, `test:e2e`, `build` (back) ; démarrage réel des 2 serveurs en
   local et vérification bout-en-bout (page HTML, `robots.txt`, préflight CORS, réponse
   `/api/health`).
-- **Non réalisé / bloqué** : le choix et la mise en place de l'hébergement (site + API en HTTPS,
-  déploiement automatique réel, journaux consultables en ligne) — le ticket exige une validation
-  explicite du fournisseur et de tout engagement financier avant de créer des services externes ;
-  cette validation était encore en attente au moment de la rédaction. En conséquence : pas
-  d'adresse HTTPS publique à ce jour, pas de démonstration accessible depuis un autre appareil,
-  étape de déploiement des workflows CI non ajoutée, procédure de retour arrière non écrite
-  (rien n'est encore déployé).
-- **Travail restant** : dès validation du fournisseur d'hébergement — créer les services,
-  compléter les workflows CI avec l'étape de déploiement, documenter les URL/journaux/procédure
-  de retour arrière, puis exécuter les vérifications de bout en bout demandées par le ticket
-  (push réel front et back, constat de la mise à jour en ligne).
+- **Non réalisé au moment de la rédaction initiale** : le choix et la mise en place de
+  l'hébergement — voir l'entrée de journal suivante pour sa réalisation effective une fois la
+  validation utilisateur obtenue.
+
+### 2026-09-07 — TECH-003 (suite) — Hébergement Vercel + Render
+
+- **Dépôts concernés** : aucun changement de code ; configuration côté dashboards Vercel et
+  Render, plus mise à jour de ce fichier.
+- **Résultat réalisé et vérifié** : proposition d'hébergement (Vercel front / Render back, 0 €)
+  validée explicitement par l'utilisateur via un choix présenté avec alternatives. Services
+  créés, connectés aux dépôts GitHub existants, déploiement automatique natif confirmé sur push.
+  Variables d'environnement réelles configurées dans chaque dashboard (jamais commitées) :
+  `NEXT_PUBLIC_API_URL` côté Vercel, `CORS_ORIGIN` et `APP_ENVIRONMENT=test` côté Render.
+- **Vérifications effectuées (par appel réel, pas par supposition)** : `curl` direct sur
+  `https://vetement-back.onrender.com/api/health` (200, `status: ok`) ; préflight et requête
+  CORS réels depuis l'origine Vercel (en-tête `Access-Control-Allow-Origin` présent seulement
+  pour cette origine) ; chargement réel de `https://vetement-front.vercel.app` (200).
+- **Incident rencontré et corrigé** : variable Render mal nommée `PP_ENVIRONMENT` (au lieu de
+  `APP_ENVIRONMENT`) — l'API retombait silencieusement sur `environment: "development"`.
+  Diagnostiqué en comparant deux appels `curl` successifs (pas en supposant qu'un nouveau
+  déploiement identique avait changé quoi que ce soit), confirmé par la liste réelle des
+  variables fournie par l'utilisateur, corrigé en renommant la variable.
+- **Limite documentée** : plan gratuit Render — mise en veille après inactivité, ~30–60 s de
+  démarrage à froid sur la requête suivante. Connue et acceptée par l'utilisateur.
+- **Travail restant** : aucun pour la partie hébergement de TECH-003 — périmètre livré.
+
+### 2026-09-07 — US-004 — Page d'accueil publique, responsive et trilingue
+
+- **Dépôt concerné** : vetement-front uniquement (aucune modification métier du back-end, comme
+  prévu par le ticket) ; ce fichier et le `README.md`/`CLAUDE.md` de vetement-front.
+- **Résultat réalisé et vérifié** :
+  - Routage par langue avec **next-intl** (nouvelle dépendance, justifiée en section G) :
+    `/fr`, `/en`, `/ar` (`localePrefix: 'always'`), langue par défaut française, choix mémorisé
+    par cookie (persiste après actualisation et lors d'une prochaine visite), une langue dans
+    l'URL prime toujours sur le cookie mémorisé. `/` redirige vers la langue mémorisée ou `/fr`.
+    Une langue non supportée dans l'URL (ex. `/de`) est traitée comme un chemin sous la langue
+    par défaut et aboutit à une page 404 standard Next.js — comportement cohérent, pas d'erreur
+    serveur (vérifié par `curl`).
+  - Convention **Next.js 16** respectée : fichier `src/proxy.ts` (export nommé `proxy`), pas
+    `middleware.ts` (dépréciée, avertissement de build constaté puis supprimé après migration).
+  - Page d'accueil assemblée à partir de composants dédiés : `Header` (logo, ancre « Comment ça
+    marche ? », `LanguageSwitcher`, boutons Connexion/Inscription réellement `disabled` avec
+    légende visible « Bientôt disponible », pas seulement une infobulle), `Hero`, `HowItWorks`
+    (3 étapes), `ListingsPlaceholder` (état d'attente honnête : aucun appel réseau, aucune
+    fausse annonce/prix/vendeur), `Footer` (mention « Version de test »).
+  - Arabe en RTL réel : `<html lang="ar" dir="rtl">` posé dans `src/app/[locale]/layout.tsx`
+    (vérifié par `curl`), mise en page construite avec des propriétés CSS logiques pour suivre
+    automatiquement le sens de lecture ; logo et illustrations non retournés.
+  - Identité visuelle propre au projet (vert profond, blanc cassé/sable, rouge utilisé avec
+    parcimonie ; police Cairo unique couvrant latin et arabe, chargée via `next/font/google`
+    donc auto-hébergée au build — aucune dépendance réseau externe à l'exécution) ; trois
+    illustrations SVG **originales, créées pour ce projet** (`public/images/`, aucun asset
+    externe ni photographie de tiers) : motif géométrique répété inspiré du zellige, illustration
+    de vêtements pour le hero, cintre pour l'état d'attente des annonces.
+  - Zone de diagnostic technique de TECH-003 déplacée vers `/<langue>/diagnostic` (inchangée
+    fonctionnellement, toujours `noindex`, non traduite — outil interne, pas une page produit).
+  - Textes centralisés dans `src/messages/{fr,en,ar}.json` (aucun texte dispersé dans les
+    composants), incluant les libellés d'accessibilité (`aria-label` des boutons/nav) et les
+    métadonnées de page (titre/description traduits par langue).
+  - Nom de marque « Vetement » utilisé à titre provisoire (voir section G).
+- **Tests et vérifications effectués (tous réussis)** :
+  - `npm run type-check`, `npm run lint` (0 erreur, 2 avertissements bénins sur l'usage de
+    `<img>` pour des SVG décoratifs), `npm test` (nouveaux tests Vitest + Testing Library :
+    sélecteur de langue — 3 langues présentes, langue active correctement marquée, chaque lien
+    cible sa propre langue ; boutons désactivés — réellement `disabled`, légende visible sans
+    survol, aucun clic possible), `npm run build`.
+  - Vérification locale réelle (serveur construit démarré sur le port 3100) : redirection `/` →
+    `/fr` (307), `lang`/`dir` corrects sur `/fr`, `/en`, `/ar`, titres traduits, `/de` → 404
+    cohérent, `/fr/diagnostic` accessible (200), `robots.txt` toujours `Disallow: /`, un seul
+    `<h1>` par page, boutons Connexion/Inscription réellement `disabled` dans le HTML rendu.
+  - Vérification en ligne après push et déploiement Vercel réel (pas seulement locale) : mêmes
+    contrôles rejoués sur `https://vetement-front.vercel.app` (redirection, `lang`/`dir`,
+    `/fr/diagnostic`, `robots.txt`, boutons désactivés) — tous conformes.
+  - **Non vérifié par l'agent** (nécessite un navigateur réel, hors de portée des outils
+    disponibles) : rendu visuel effectif aux largeurs 360/390/768/1440 px, navigation clavier
+    complète à la souris/au clavier physique, contraste mesuré par un outil dédié, captures
+    d'écran ordinateur/téléphone demandées par le ticket. À vérifier par l'utilisateur ou lors
+    d'une prochaine intervention outillée pour cela.
+- **Commit** : `515cdac` (vetement-front).
+- **Travail restant** : vérification visuelle multi-largeurs et captures d'écran (voir
+  ci-dessus) ; le reste du périmètre US-004 est livré.
