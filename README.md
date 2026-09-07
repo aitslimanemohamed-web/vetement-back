@@ -16,12 +16,41 @@ Le front-end (site web, applications iOS et Android) vit dans un dépôt sépar�
 git clone https://github.com/aitslimanemohamed-web/vetement-back.git
 ```
 
+## Technologies
+
+- [NestJS](https://nestjs.com/) avec TypeScript, exécuté sur Node.js.
+
+## Développement local
+
+```
+npm install
+cp .env.example .env         # puis ajuster CORS_ORIGIN si besoin
+npm run start:dev            # démarre le serveur en local (http://localhost:3001)
+npm run type-check           # vérifie les types TypeScript
+npm run lint                 # vérifie le code
+npm test                     # exécute les tests unitaires
+npm run test:e2e             # exécute les tests end-to-end
+npm run build                # construit le serveur
+npm run start:prod           # démarre la version construite (dist/main.js)
+```
+
+## Route publique
+
+`GET /api/health` — confirme uniquement que le processus API répond (pas de base de données
+ni de stockage à vérifier, aucun n'existe encore) :
+
+```json
+{ "status": "ok", "service": "vetement-back", "environment": "test", "version": "<commit>" }
+```
+
 ## État actuel
 
-Ce dépôt ne contient pour l'instant aucun code applicatif. Aucun serveur n'est exécutable à ce
-stade.
+Le serveur démarre, expose `GET /api/health`, et autorise les appels du front-end via CORS
+(origine configurable). Aucune fonctionnalité métier (annonces, comptes, messagerie...)
+n'existe encore — voir le fichier de référence pour le détail exact de ce qui est réalisé,
+prévu ou bloqué.
 
-Restent à définir : les technologies utilisées et l'hébergement.
+Restent à définir : l'hébergement définitif.
 
 ## Dossier `database/`
 

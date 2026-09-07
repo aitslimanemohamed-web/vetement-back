@@ -10,6 +10,12 @@ secrets/
 # Autoriser explicitement les exemples sans secret
 !.env.example
 
+# Node.js / NestJS
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
 # Base de données : jamais de données réelles, sauvegardes ou identifiants
 database/*.sql
 database/*.dump

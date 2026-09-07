@@ -49,6 +49,9 @@ hébergement, etc.).
 
 ## Avant chaque commit
 
+- Exécuter `npm run type-check`, `npm run lint`, `npm test`, `npm run test:e2e` et
+  `npm run build` — tous doivent réussir (c'est aussi ce que vérifie automatiquement la CI sur
+  push).
 - Vérifier qu'aucun secret n'est inclus dans les fichiers ajoutés.
 - Vérifier que les fichiers ajoutés correspondent bien au périmètre du ticket en cours.
 - Vérifier que la documentation reflète l'état réel du projet.
