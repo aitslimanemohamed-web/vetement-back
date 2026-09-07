@@ -336,6 +336,7 @@ CI (section D, sous-section Hébergement).
 | 2026-09-07 | Motifs géométriques répétés (étoiles) retirés des fonds de section, remplacés par des fonds unis | Demandé explicitement par l'utilisateur (COR-006) — voir la règle graphique ci-dessous, qui remplace la décision TECH-003/US-004 d'utiliser un motif géométrique décoratif inspiré du zellige. |
 | 2026-09-07 | Inscription (US-007) : **nom d'utilisateur + mot de passe** uniquement, pas d'e-mail/téléphone/connexion tierce | Choix explicite du ticket US-007. Politique du mot de passe (15-128 caractères, pas de composition imposée) alignée sur la [recommandation OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) citée par le ticket, privilégiant la longueur sans second facteur. |
 | 2026-09-07 | Comptage des caractères par **grappe de graphèmes Unicode** (`Intl.Segmenter`, repli sur `Array.from`) pour les limites de longueur du nom d'utilisateur et du mot de passe | Une lettre de base + une marque diacritique combinante (voyellation arabe, accent latin décomposé) doit compter comme un seul caractère pour l'utilisateur ; à reproduire à l'identique côté back-end pour que les deux validations restent cohérentes. |
+| 2026-09-08 | Icônes œil/œil barré du mot de passe : **SVG original dessiné pour le projet**, aucune bibliothèque d'icônes ajoutée | Choix explicite du ticket COR-008 (« bibliothèque déjà présente, ou SVG simple » — aucune bibliothèque d'icônes n'était présente) ; évite une dépendance supplémentaire pour deux icônes. |
 
 ### Règle graphique à mémoriser (COR-006, 2026-09-07)
 
@@ -723,3 +724,57 @@ explicite de l'utilisateur.
   du périmètre US-007 est livré. Rappel explicite : l'inscription n'est connectée à aucun
   back-end — un futur ticket devra créer le service d'authentification réel, la vérification de
   disponibilité du nom d'utilisateur, la récupération de compte, et la page de connexion.
+
+### 2026-09-08 — COR-008 — Débordement mobile de l'inscription et icônes œil
+
+- **Problème constaté** : débordement horizontal visible sur téléphone sur la page
+  d'inscription (capture fournie par l'utilisateur), formulaire non centré.
+- **Dépôt concerné** : vetement-front uniquement.
+- **Cause identifiée par lecture du code, pas supposée** : dans `PasswordField.module.css`,
+  `.inputRow` était une ligne flex (`display:flex`) contenant le champ (`flex:1`) et un bouton
+  texte (`.toggle`) avec `white-space: nowrap` portant un libellé long (« Afficher la
+  confirmation du mot de passe »). Un élément flexible ne rétrécit pas, par défaut, en dessous
+  de la largeur de son contenu non coupé (`min-width: auto`) : ce bouton refusait de rétrécir,
+  ce qui poussait la ligne — et donc la page — en dehors de la largeur de l'écran sur mobile.
+  Aucun autre composant du site n'était en cause.
+- **Résultat réalisé et vérifié** :
+  - Les deux boutons afficher/masquer texte sont remplacés par une icône œil / œil barré
+    (SVG original dessiné pour ce projet, aucune bibliothèque ajoutée, aucun emoji), en position
+    absolue **à l'intérieur** du contour du champ (`inset-inline-end`, qui s'inverse seul en
+    arabe : icône à droite en fr/en, à gauche en ar — vérifié en ligne). Le nom accessible passe
+    par `aria-label` (« Afficher/Masquer le mot de passe », « Afficher/Masquer la confirmation
+    du mot de passe », traduits) puisqu'il n'y a plus de texte visible ; le dessin SVG est
+    `aria-hidden` pour éviter une double annonce au lecteur d'écran.
+  - Zone tactile de 44×44px réelle (bouton `width:44px`, inséré à 2px des bords d'un champ en
+    `min-height:48px`), fond transparent par défaut, focus visible (règle globale existante),
+    fonctionne au clic et au clavier (bouton natif `type="button"`, jamais de soumission), ne
+    déplace jamais la mise en page (position absolue, ne pousse aucun autre élément), conserve
+    la valeur saisie (le changement de visibilité ne touche qu'un état local d'affichage).
+  - Les trois champs (nom d'utilisateur, mot de passe, confirmation) partagent désormais
+    exactement la même largeur (`width:100%`), la même hauteur minimale (`min-height:48px`) et
+    la même taille de texte (`font-size:1rem`, ≥16px — évite le zoom automatique de Safari iOS
+    tout en conservant le zoom utilisateur, qui n'est bloqué nulle part sur le site). Le champ
+    de mot de passe réserve l'espace de l'icône via `padding-inline-end` (le texte saisi ne
+    passe jamais dessous, quelle que soit la langue).
+  - Bouton « S'inscrire » désormais pleine largeur du formulaire (`align-self: stretch`).
+  - Conteneur du formulaire inchangé dans son principe (centré, max 480px, marges latérales
+    24px, resserrées à 16px sous 380px de large) : le problème ne venait pas du conteneur mais
+    du contenu d'un champ, comme identifié ci-dessus. Aucun `overflow-x: hidden` supplémentaire
+    n'a été ajouté pour masquer le symptôme.
+- **Vérifications effectuées (toutes réussies)** : `npm run type-check`, `npm run lint`
+  (0 erreur), `npm test` (40 tests, dont 2 nouveaux couvrant l'activation clavier de l'icône et
+  l'indépendance des deux bascules afficher/masquer), `npm run build`. Lecture directe du CSS
+  compilé (local puis en ligne sur Vercel) confirmant : bouton `width:44px` en position absolue
+  avec `inset-inline-end:2px`, `padding-inline:.8rem 3rem` réservé sur les champs de mot de
+  passe, `min-height:48px` et `font-size:1rem` sur les trois champs, bouton d'inscription en
+  `align-self:stretch`. Vérification en ligne réelle : aucun texte visible « Afficher... »
+  (seulement dans les `aria-label`), traductions anglaise et arabe des `aria-label` correctes
+  sur `/en` et `/ar/inscription`, `dir="rtl"` toujours correct, les 3 langues répondent 200.
+  - **Non vérifié par l'agent** (nécessite un navigateur réel avec contrôle visuel humain, hors
+    de portée des outils disponibles) : absence réelle de défilement horizontal aux largeurs
+    320/360/390/768/1440px, apparence effective sur téléphone (dont les captures demandées en
+    français et en arabe), confort tactile réel des icônes, comportement du clavier virtuel
+    mobile à l'ouverture d'un champ.
+- **Commit** : `87af400` (vetement-front).
+- **Travail restant** : contrôle visuel humain multi-largeurs et captures d'écran (voir
+  ci-dessus) ; le reste du périmètre COR-008 est livré.
