@@ -206,7 +206,7 @@ pas à pas) :
 
 Ces références (projet, région, hôte, ports) ne sont pas sensibles — aucun mot de passe ni
 chaîne de connexion complète n'est inscrit ici, conformément à la règle du fichier.
-Migrations pas encore appliquées sur ce projet réel au moment de la rédaction — voir État réel
+**Migrations appliquées et vérifiées sur ce projet réel le 2026-09-08** — voir État réel
 (section E) et journal (section H).
 
 **Outil de migrations : [Prisma](https://www.prisma.io/) (`prisma migrate`).** Aucun outil de
@@ -403,18 +403,13 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
   texte non rétrécissable dans une ligne flex, pas le conteneur) ; boutons afficher/masquer
   remplacés par des icônes œil intégrées au champ, avec zone tactile de 44px. Détail complet en
   journal ci-dessous.
-
-**En cours (code prêt et testé en local, infrastructure réelle non encore raccordée) :**
 - **US-009** — API d'inscription réelle (`POST /api/auth/register`), NestJS + Prisma +
-  PostgreSQL + Argon2id, entièrement écrite et vérifiée contre une vraie base Postgres locale
-  (pas Supabase) : création réelle, unicité en base sous concurrence réelle, rejet des mots de
-  passe courants, limitation de requêtes, dégradation propre (503) si la base est injoignable.
-  Formulaire front raccordé pour de vrai (plus de message de succès local). **Ce qui manque
-  avant de considérer ce ticket terminé** : création du projet Supabase réel, application des
-  migrations dessus, configuration des variables secrètes sur Render, déploiement, et recette
-  complète en ligne (création d'un compte fictif depuis Vercel, vérification en base, refus
-  d'un doublon) — voir section D (sous-section Base de données) et journal ci-dessous pour le
-  détail exact de ce qui est fait et de ce qui reste bloqué par l'accès à cette infrastructure.
+  PostgreSQL (Supabase) + Argon2id, déployée et vérifiée de bout en bout le 2026-09-08 :
+  création réelle, unicité en base sous concurrence réelle, rejet des mots de passe courants,
+  limitation de requêtes, dégradation propre (503) si la base est injoignable, et — sur
+  l'infrastructure réelle — un vrai compte créé via l'API en ligne avec l'origine Vercel réelle,
+  vérifié en base puis nettoyé, et un doublon (exact et variante de casse) refusé (409). Détail
+  complet en journal ci-dessous.
 
 **Prévu (pas commencé) :**
 - Connexion et sessions (hors périmètre explicite de US-009).
@@ -430,8 +425,15 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
 - Stratégie de sauvegarde de la base de données (nécessaire avant un lancement réel, pas avant).
 
 **Bloqué :**
-- US-009, partie infrastructure — en attente de la création du projet Supabase par
-  l'utilisateur (voir section D et journal) ; aucun secret ne peut être créé par l'agent.
+- Aucun blocage actif au moment de la rédaction.
+
+**Point de sécurité signalé, action recommandée non encore confirmée** :
+- Le mot de passe principal du projet Supabase (rôle `postgres`) est passé une fois dans la
+  conversation avec l'agent lors de la mise en place initiale (2026-09-08). Recommandation :
+  le réinitialiser depuis le dashboard Supabase (Project Settings → Database → "Reset database
+  password") par précaution, puis mettre à jour `DIRECT_URL` sur Render en conséquence. Le mot
+  de passe du rôle applicatif `vetement_app`, lui, a été généré et fixé directement par l'agent
+  sans jamais transiter en clair dans un message de l'utilisateur.
 
 ## F. Reprise du travail
 
@@ -1045,9 +1047,52 @@ explicite de l'utilisateur.
     complète en ligne (étapes 1 à 8 du ticket, section 14) — création d'un compte fictif depuis
     le site Vercel réel, vérification dans la vraie base Supabase, refus d'un doublon en
     production, comportement réel du démarrage à froid de Render avec la base connectée.
-- **Commits (non poussés au moment de la rédaction de cette entrée)** : vetement-back
-  `ea8adc4` ; vetement-front `1b68ba6`.
-- **Travail restant** : toute la partie infrastructure réelle (section D, sous-section Base de
-  données) — création du projet Supabase, application des migrations, configuration des secrets
-  Render, déploiement, recette en ligne complète. Cette entrée sera complétée (ou une nouvelle
-  ajoutée) une fois cette partie terminée.
+- **Commits** : vetement-back `ea8adc4` ; vetement-front `1b68ba6` — poussés depuis (voir
+  l'entrée suivante pour la suite et la partie infrastructure, terminée le même jour).
+
+### 2026-09-08 — US-009 (suite) — Infrastructure Supabase créée, recette en ligne complète
+
+- **Dépôts concernés** : vetement-back uniquement (configuration d'hébergement, aucun nouveau
+  code applicatif).
+- **Déroulé, accompagné pas à pas avec l'utilisateur** (création de compte Supabase, création
+  du projet — région Europe/`eu-west-1` —, récupération des chaînes de connexion via le bouton
+  "Connect → ORM" du dashboard réel, ajout des variables sur Render).
+- **Ajustement technique fait pendant cette étape** : le dashboard Supabase réel recommandait un
+  mécanisme différent de celui prévu initialement (pooler Supavisor + champ `directUrl` natif de
+  Prisma, plutôt qu'une connexion directe et une variable `MIGRATE_DATABASE_URL` maison) — voir
+  la décision correspondante en section G et le commit `1daca8e`.
+- **Résultat réalisé et vérifié (sur le vrai projet Supabase, pas une simulation)** :
+  - Migrations appliquées avec succès (`prisma migrate deploy` contre `DIRECT_URL` réel).
+  - Vérifié directement en base (requêtes SQL réelles, pas supposé) : schéma `app` présent,
+    table `app.users` présente, rôle `vetement_app` créé, permissions effectives = exactement
+    `SELECT`+`INSERT` sur `app.users` (confirmé), et **aucun** droit pour `anon`/`authenticated`/
+    `PUBLIC` sur ce schéma (confirmé, liste vide).
+  - Mot de passe du rôle `vetement_app` généré aléatoirement et fixé par l'agent (24 octets
+    aléatoires, encodage base64url) — jamais choisi ni transmis par l'utilisateur.
+  - `DATABASE_URL` (rôle applicatif, pooler transaction) et `DIRECT_URL` (rôle privilégié,
+    pooler session) configurées comme variables secrètes sur Render.
+  - **Recette en ligne complète (section 14 du ticket, toutes les étapes)** : back-end
+    redéployé avec succès (dépendances natives — Prisma, argon2 — compilées sans problème sur
+    Render) ; `POST /api/auth/register` testé en HTTPS réel avec l'en-tête `Origin` de
+    l'application Vercel réelle → compte créé (`201 ACCOUNT_CREATED`), vérifié directement dans
+    la vraie base Supabase (ligne présente, empreinte Argon2id valide), puis un doublon exact et
+    une variante de casse tous deux refusés (`409 USERNAME_TAKEN`). Les comptes de test créés
+    pendant cette vérification ont été supprimés ensuite (via le rôle privilégié, le rôle
+    applicatif ne pouvant pas supprimer — vérifié aussi : une tentative de suppression avec
+    `vetement_app` échoue bien).
+  - `GET /api/health` vérifié inchangé pendant toute l'opération.
+- **Incident de sécurité mineur et sa gestion** : le mot de passe principal du projet Supabase
+  (rôle `postgres`) a été collé une fois par l'utilisateur directement dans la conversation, à
+  la suite d'une incompréhension sur la façon de le transmettre sans passer par le chat.
+  L'agent l'a utilisé une seule fois puis a immédiatement recommandé sa réinitialisation (voir
+  section E) plutôt que de le conserver ou de continuer à s'en servir. Une seconde tentative de
+  l'agent de fixer un mot de passe (celui du rôle applicatif, pas celui du projet) a été bloquée
+  par un garde-fou de sécurité automatique de l'environnement d'exécution ; l'agent s'est arrêté,
+  a expliqué la situation à l'utilisateur et a attendu une autorisation explicite avant de
+  réessayer — conformément à la consigne de ne jamais contourner ce type de blocage.
+- **Non vérifié par l'agent** (nécessite un navigateur réel) : passage effectif par le
+  formulaire d'inscription du site Vercel lui-même (souris/clavier, écran réel) plutôt que par
+  un appel direct à l'API reproduisant les mêmes en-têtes — le comportement de l'API étant
+  identique dans les deux cas, ceci reste une vérification complémentaire, pas contradictoire.
+- **Travail restant pour US-009** : aucun côté infrastructure. Réinitialisation du mot de passe
+  principal Supabase recommandée (voir section E) — à confirmer par l'utilisateur.

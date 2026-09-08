@@ -52,7 +52,7 @@ hébergement, etc.).
 Structure et permissions versionnées dans `prisma/migrations/` — jamais de modification manuelle
 du schéma en base, jamais de synchronisation automatique destructive. Deux connexions
 distinctes : `DATABASE_URL` (rôle applicatif restreint, utilisé par le serveur) et
-`MIGRATE_DATABASE_URL` (rôle privilégié, utilisé uniquement par `npm run db:migrate:deploy`).
+`DIRECT_URL` (rôle privilégié, lu uniquement par `npm run db:migrate:deploy`).
 Voir `docs/CONTEXTE_PROJET.md` pour le détail complet (Supabase, permissions, procédure).
 
 ## Avant chaque commit
