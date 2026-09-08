@@ -47,11 +47,20 @@ Mettre à jour le `README.md` de ce dépôt (et `database/README.md` si besoin) 
 changement rend une information existante obsolète (nouvelles technologies choisies, nouvel
 hébergement, etc.).
 
+## Base de données
+
+Structure et permissions versionnées dans `prisma/migrations/` — jamais de modification manuelle
+du schéma en base, jamais de synchronisation automatique destructive. Deux connexions
+distinctes : `DATABASE_URL` (rôle applicatif restreint, utilisé par le serveur) et
+`MIGRATE_DATABASE_URL` (rôle privilégié, utilisé uniquement par `npm run db:migrate:deploy`).
+Voir `docs/CONTEXTE_PROJET.md` pour le détail complet (Supabase, permissions, procédure).
+
 ## Avant chaque commit
 
 - Exécuter `npm run type-check`, `npm run lint`, `npm test`, `npm run test:e2e` et
   `npm run build` — tous doivent réussir (c'est aussi ce que vérifie automatiquement la CI sur
-  push).
+  push). `npm run test:e2e` a besoin d'une vraie base Postgres de test (`DATABASE_URL` pointant
+  dessus) — jamais la base Supabase réelle.
 - Vérifier qu'aucun secret n'est inclus dans les fichiers ajoutés.
 - Vérifier que les fichiers ajoutés correspondent bien au périmètre du ticket en cours.
 - Vérifier que la documentation reflète l'état réel du projet.

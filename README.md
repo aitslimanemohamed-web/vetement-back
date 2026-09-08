@@ -19,38 +19,47 @@ git clone https://github.com/aitslimanemohamed-web/vetement-back.git
 ## Technologies
 
 - [NestJS](https://nestjs.com/) avec TypeScript, exécuté sur Node.js.
+- [Prisma](https://www.prisma.io/) (ORM + migrations) sur PostgreSQL (Supabase, plan gratuit).
+- [argon2](https://www.npmjs.com/package/argon2) (Argon2id) pour le hachage des mots de passe.
+- [@nestjs/throttler](https://github.com/nestjs/throttler) pour la limitation de requêtes.
 
 ## Développement local
 
 ```
-npm install
-cp .env.example .env         # puis ajuster CORS_ORIGIN si besoin
+npm install                  # exécute aussi `prisma generate` (postinstall)
+cp .env.example .env         # puis ajuster CORS_ORIGIN, DATABASE_URL si besoin
 npm run start:dev            # démarre le serveur en local (http://localhost:3001)
 npm run type-check           # vérifie les types TypeScript
 npm run lint                 # vérifie le code
 npm test                     # exécute les tests unitaires
-npm run test:e2e             # exécute les tests end-to-end
+npm run test:e2e             # exécute les tests end-to-end (nécessite une vraie base Postgres
+                              # de test — jamais Supabase — voir docs/CONTEXTE_PROJET.md)
 npm run build                # construit le serveur
 npm run start:prod           # démarre la version construite (dist/main.js)
+npm run db:migrate:deploy    # applique les migrations versionnées (prisma/migrations/)
 ```
 
-## Route publique
+## Routes publiques
 
-`GET /api/health` — confirme uniquement que le processus API répond (pas de base de données
-ni de stockage à vérifier, aucun n'existe encore) :
+- `GET /api/health` — confirme que le processus API répond :
 
-```json
-{ "status": "ok", "service": "vetement-back", "environment": "test", "version": "<commit>" }
-```
+  ```json
+  { "status": "ok", "service": "vetement-back", "environment": "test", "version": "<commit>" }
+  ```
+
+- `POST /api/auth/register` — crée réellement un compte (nom d'utilisateur + mot de passe
+  uniquement), limité à 5 tentatives/minute/IP. Voir `docs/CONTEXTE_PROJET.md` pour le contrat
+  complet (codes de réponse, règles de validation, hachage).
 
 ## État actuel
 
-Le serveur démarre, expose `GET /api/health`, et autorise les appels du front-end via CORS
-(origine configurable). Déployé et vérifié en ligne (Render, plan gratuit) :
-https://vetement-back.onrender.com/api/health — voir `docs/CONTEXTE_PROJET.md` pour le détail
-et les limites connues (mise en veille après inactivité). Aucune fonctionnalité métier
-(annonces, comptes, messagerie...) n'existe encore — voir le fichier de référence pour le
-détail exact de ce qui est réalisé, prévu ou bloqué.
+Le serveur démarre, expose `GET /api/health` et `POST /api/auth/register`, et autorise les
+appels du front-end via CORS (origine configurable). Déployé et vérifié en ligne (Render, plan
+gratuit) : https://vetement-back.onrender.com/api/health — voir `docs/CONTEXTE_PROJET.md` pour
+le détail et les limites connues (mise en veille après inactivité). L'inscription crée un vrai
+compte dans PostgreSQL (Supabase, plan gratuit) ; aucune autre fonctionnalité métier (connexion,
+annonces, messagerie...) n'existe encore — voir le fichier de référence pour le détail exact de
+ce qui est réalisé, prévu ou bloqué.
 
 ## Dossier `database/`
 

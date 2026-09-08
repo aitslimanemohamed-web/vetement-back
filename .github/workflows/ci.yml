@@ -1,7 +1,8 @@
 name: CI
 
-# Vérifications automatiques (TECH-003). Le déploiement sera ajouté une fois
-# l'hébergement choisi et validé — voir docs/CONTEXTE_PROJET.md.
+# Vérifications automatiques avant déploiement. Le déploiement lui-même est
+# géré nativement par Render (intégration Git + Pre-Deploy Command pour les
+# migrations, voir CONTEXTE_PROJET.md), pas par ce workflow.
 on:
   push:
     branches: [main]
@@ -11,6 +12,29 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # Base Postgres jetable pour cette exécution de CI uniquement — aucun lien
+    # avec la base Supabase réelle. Mot de passe fixé ici sans risque : ce
+    # conteneur est détruit à la fin du job (US-009).
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci_test_password
+          POSTGRES_DB: vetement_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Rôle privilégié, utilisé uniquement pour appliquer les migrations.
+      MIGRATE_DATABASE_URL: postgresql://postgres:ci_test_password@localhost:5432/vetement_ci
+      # Rôle applicatif restreint (créé par la migration), utilisé par
+      # l'application et par les tests end-to-end — même séparation des
+      # droits que documentée pour la base réelle (CONTEXTE_PROJET.md).
+      DATABASE_URL: postgresql://vetement_app:ci_app_password@localhost:5432/vetement_ci
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +51,12 @@ jobs:
 
       - name: Vérifier le code (lint)
         run: npm run lint
+
+      - name: Appliquer les migrations (base de test CI)
+        run: DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma migrate deploy
+
+      - name: Fixer le mot de passe du rôle applicatif (base de test CI uniquement)
+        run: echo "ALTER ROLE vetement_app WITH PASSWORD 'ci_app_password';" | DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma db execute --stdin --schema=prisma/schema.prisma
 
       - name: Exécuter les tests unitaires
         run: npm test

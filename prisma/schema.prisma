@@ -1,0 +1,40 @@
+// Schéma de la base de données (US-009).
+//
+// Le modèle vit dans le schéma Postgres "app" (pas "public") : la Data API
+// Supabase (PostgREST) n'expose que le schéma "public" par défaut, donc les
+// comptes utilisateurs restent invisibles à cette API sans configuration
+// supplémentaire. Des permissions explicites (REVOKE/GRANT) viennent
+// renforcer ce choix — voir prisma/migrations/ et CONTEXTE_PROJET.md.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connexion applicative (rôle restreint, droits minimaux) — voir la
+  // variable MIGRATE_DATABASE_URL, distincte, utilisée uniquement pour
+  // appliquer les migrations avec un rôle plus privilégié.
+  url      = env("DATABASE_URL")
+  schemas  = ["app"]
+}
+
+/// Compte utilisateur (US-009) : uniquement nom d'utilisateur + mot de passe.
+/// Pas d'e-mail, de téléphone, d'annonce ni de profil dans ce périmètre.
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// Nom d'utilisateur normalisé (espaces de bord retirés, NFC), affiché tel
+  /// quel — conserve sa casse d'origine.
+  username     String
+  /// Clé d'unicité : username normalisé, mis en minuscules de façon
+  /// indépendante de la langue, puis renormalisé en NFC. Voir
+  /// src/auth/register/username-policy.ts pour la fonction exacte, qui doit
+  /// rester le seul endroit où cette règle est implémentée.
+  usernameKey  String   @unique @map("username_key")
+  /// Empreinte Argon2id (jamais le mot de passe en clair, jamais réversible).
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("users")
+  @@schema("app")
+}
