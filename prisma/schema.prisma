@@ -11,11 +11,16 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  // Connexion applicative (rôle restreint, droits minimaux) — voir la
-  // variable MIGRATE_DATABASE_URL, distincte, utilisée uniquement pour
-  // appliquer les migrations avec un rôle plus privilégié.
-  url      = env("DATABASE_URL")
-  schemas  = ["app"]
+  // Connexion applicative (rôle restreint, droits minimaux), utilisée par le
+  // serveur en exécution — via le pooler Supavisor en mode transaction chez
+  // Supabase.
+  url       = env("DATABASE_URL")
+  // Connexion utilisée UNIQUEMENT par `prisma migrate deploy` (rôle
+  // privilégié) — mécanisme natif de Prisma pour ce cas précis, via le
+  // pooler Supavisor en mode session chez Supabase (recommandation Supabase
+  // actuelle : https://supabase.com/docs/guides/database/prisma).
+  directUrl = env("DIRECT_URL")
+  schemas   = ["app"]
 }
 
 /// Compte utilisateur (US-009) : uniquement nom d'utilisateur + mot de passe.

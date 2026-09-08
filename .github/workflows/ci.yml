@@ -29,8 +29,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # Rôle privilégié, utilisé uniquement pour appliquer les migrations.
-      MIGRATE_DATABASE_URL: postgresql://postgres:ci_test_password@localhost:5432/vetement_ci
+      # Rôle privilégié, lu nativement par `prisma migrate deploy` (champ
+      # directUrl du schéma) — jamais par l'application.
+      DIRECT_URL: postgresql://postgres:ci_test_password@localhost:5432/vetement_ci
       # Rôle applicatif restreint (créé par la migration), utilisé par
       # l'application et par les tests end-to-end — même séparation des
       # droits que documentée pour la base réelle (CONTEXTE_PROJET.md).
@@ -53,10 +54,10 @@ jobs:
         run: npm run lint
 
       - name: Appliquer les migrations (base de test CI)
-        run: DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma migrate deploy
+        run: npx prisma migrate deploy
 
       - name: Fixer le mot de passe du rôle applicatif (base de test CI uniquement)
-        run: echo "ALTER ROLE vetement_app WITH PASSWORD 'ci_app_password';" | DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma db execute --stdin --schema=prisma/schema.prisma
+        run: echo "ALTER ROLE vetement_app WITH PASSWORD 'ci_app_password';" | npx prisma db execute --stdin --url "$DIRECT_URL"
 
       - name: Exécuter les tests unitaires
         run: npm test

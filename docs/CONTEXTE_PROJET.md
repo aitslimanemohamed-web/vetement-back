@@ -193,9 +193,21 @@ test.** Supabase sert uniquement d'hébergeur PostgreSQL — **Supabase Auth n'e
 l'inscription est gérée entièrement par NestJS. Le navigateur ne se connecte jamais directement
 à la base.
 
-**Projet Supabase réel : à créer avec l'utilisateur — non encore fait au moment de la
-rédaction.** Cette sous-section sera complétée (référence de projet, région) une fois le projet
-créé ; aucune information n'est inventée ici en attendant.
+**Projet Supabase réel créé le 2026-09-08** (par l'utilisateur, avec l'agent en accompagnement
+pas à pas) :
+
+| Élément | Valeur |
+|---|---|
+| Référence de projet | `kngppdouwvvditlrvrep` |
+| Région | Europe (`eu-west-1`) — proche de la région du service Render |
+| Hôte du pooler Supavisor | `aws-1-eu-west-1.pooler.supabase.com` |
+| Port pooler transaction (app, `DATABASE_URL`) | `6543` (`?pgbouncer=true`) |
+| Port pooler session (migrations, `DIRECT_URL`) | `5432` |
+
+Ces références (projet, région, hôte, ports) ne sont pas sensibles — aucun mot de passe ni
+chaîne de connexion complète n'est inscrit ici, conformément à la règle du fichier.
+Migrations pas encore appliquées sur ce projet réel au moment de la rédaction — voir État réel
+(section E) et journal (section H).
 
 **Outil de migrations : [Prisma](https://www.prisma.io/) (`prisma migrate`).** Aucun outil de
 migration n'existait avant ce ticket ; Prisma a été choisi pour sa prise en charge native de
@@ -221,38 +233,40 @@ schéma pour les rôles publics Supabase `anon` et `authenticated` (dans un bloc
 ces rôles n'existent pas sur un Postgres local/CI ordinaire, donc la migration reste
 utilisable partout).
 
-**Deux connexions distinctes (séparation des droits de migration et d'exécution)** :
+**Deux connexions distinctes (séparation des droits de migration et d'exécution)**, via le champ
+natif `directUrl` de Prisma (pas une bidouille de variable d'environnement) :
 
 | Variable | Rôle Postgres | Utilisée par | Droits |
 |---|---|---|---|
-| `MIGRATE_DATABASE_URL` | Rôle privilégié Supabase (ex. `postgres`) | `npm run db:migrate:deploy` uniquement, jamais par le serveur en exécution | Création de schéma/table, `GRANT`/`REVOKE` |
-| `DATABASE_URL` | `vetement_app` (créé par la migration) | Le serveur NestJS en exécution | **`USAGE` sur le schéma `app` + `SELECT`, `INSERT` sur `app.users` uniquement** — vérifié réellement en local (`\dp app.users`), ni `UPDATE` ni `DELETE` |
+| `DIRECT_URL` | Rôle par défaut Supabase (`postgres`), pooler **session** (port 5432) | `prisma migrate deploy` uniquement (lu automatiquement via `datasource.directUrl`), jamais par le serveur en exécution | Création de schéma/table, `GRANT`/`REVOKE` |
+| `DATABASE_URL` | `vetement_app` (créé par la migration), pooler **transaction** (port 6543, `?pgbouncer=true`) | Le serveur NestJS en exécution (`datasource.url`) | **`USAGE` sur le schéma `app` + `SELECT`, `INSERT` sur `app.users` uniquement** — vérifié réellement en local (`\dp app.users`), ni `UPDATE` ni `DELETE` |
 
-Connexion Postgres recommandée pour Supabase (à confirmer une fois le projet créé, voir la
-[documentation Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres)) :
-connexion **directe** (port 5432, sans pooler) pour `MIGRATE_DATABASE_URL` (les migrations et
-leurs verrous consultatifs ne fonctionnent pas de façon fiable derrière un pooler en mode
-transaction) ; connexion **poolée Supavisor** (port 6543, `?pgbouncer=true`) pour `DATABASE_URL`
-en exécution. Chiffrement TLS par défaut de Supabase conservé tel quel — **la vérification du
-certificat n'est jamais désactivée**.
+Format Supabase (recommandation officielle actuelle, cf. le bouton "Connect → ORM → Prisma" du
+dashboard du projet — pas la connexion directe non poolée, historiquement recommandée mais plus
+la valeur par défaut aujourd'hui) :
+```
+DATABASE_URL="postgresql://vetement_app.kngppdouwvvditlrvrep:<mot_de_passe_vetement_app>@aws-1-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres.kngppdouwvvditlrvrep:<mot_de_passe_du_projet>@aws-1-eu-west-1.pooler.supabase.com:5432/postgres"
+```
+Chiffrement TLS par défaut de Supabase conservé tel quel — **la vérification du certificat n'est
+jamais désactivée**.
 
 **Mot de passe du rôle `vetement_app`** : fixé une seule fois, manuellement, via
 `ALTER ROLE "vetement_app" WITH PASSWORD '...'` exécuté directement dans l'éditeur SQL Supabase
-(ou via `prisma db execute`) — **jamais écrit dans un fichier versionné** ; la migration crée le
-rôle sans mot de passe (`CREATE ROLE ... LOGIN`, sans clause `PASSWORD`).
+(ou via `prisma db execute --url ...`) — **jamais écrit dans un fichier versionné** ; la
+migration crée le rôle sans mot de passe (`CREATE ROLE ... LOGIN`, sans clause `PASSWORD`). Ce
+mot de passe est différent de celui du projet (rôle `postgres`, utilisé par `DIRECT_URL`).
 
 **Commandes** :
 ```
-npm run db:migrate:deploy   # applique prisma/migrations/ (DATABASE_URL doit temporairement
-                             # pointer vers le rôle privilégié pour cette seule commande, ex. :
-                             # DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma migrate deploy)
+npm run db:migrate:deploy   # = `prisma migrate deploy` — utilise DIRECT_URL automatiquement
 npx prisma generate         # régénère le client (aussi automatique via le script "postinstall")
 ```
 Sur Render : la commande de migration est configurée comme **Pre-Deploy Command** (exécutée
 avant que la nouvelle version ne prenne le trafic ; un échec bloque le déploiement — exigence du
-ticket). Exactement :
+ticket) :
 ```
-DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma migrate deploy
+npx prisma migrate deploy
 ```
 
 **Règles de normalisation et d'unicité du nom d'utilisateur** (`src/auth/register/username-policy.ts`,
@@ -492,6 +506,7 @@ CI (section D, sous-section Hébergement).
 | 2026-09-08 | Comptage des caractères en **points de code Unicode** (`Array.from`, pas grappes de graphèmes) côté back (US-009) | Choix explicite et littéral du ticket back-end, qui diffère volontairement de la règle front (US-007, ci-dessus). Divergence signalée à l'utilisateur pour arbitrage plutôt que réconciliée silencieusement — voir section D et questions ouvertes. |
 | 2026-09-08 | Rôle Postgres applicatif (`vetement_app`, droits minimaux) distinct du rôle de migration | Exigence explicite du ticket ("séparer les droits de migration et d'exécution lorsque possible") ; vérifié réellement en local (`SELECT`+`INSERT` uniquement sur `app.users`). |
 | 2026-09-08 | CI (GitHub Actions) : ajout d'un conteneur Postgres jetable pour exécuter réellement les migrations et les tests end-to-end à chaque push | Les garanties les plus sensibles de US-009 (contrainte unique sous concurrence réelle, permissions du rôle applicatif) ne peuvent pas être vérifiées de façon fiable avec une base simulée ; ce conteneur est détruit à la fin de chaque exécution, sans lien avec Supabase. |
+| 2026-09-08 | Connexions Prisma via le champ natif `directUrl` (`DIRECT_URL`) plutôt qu'une variable `MIGRATE_DATABASE_URL` maison, et pooler Supavisor (transaction/session) plutôt qu'une connexion directe non poolée | Alignement sur la recommandation Supabase actuelle, découverte via le bouton "Connect → ORM" du dashboard réel du projet au moment de sa création — Supabase ne présente plus la connexion directe comme le choix par défaut. |
 
 ### Règle graphique à mémoriser (COR-006, 2026-09-07)
 
