@@ -65,6 +65,14 @@ describe('POST /api/auth/register (e2e, base réelle locale de test)', () => {
         username,
         createdAt: expect.any(String),
       },
+      // US-010 : une session est créée en même temps que le compte. Ce
+      // champ n'est consommé que par le relais Next.js (appel serveur-à-
+      // serveur) — jamais réexposé tel quel au navigateur, voir
+      // CONTEXTE_PROJET.md.
+      session: {
+        token: expect.stringMatching(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]+$/),
+        expiresAt: expect.any(String),
+      },
     });
     expect(JSON.stringify(response.body)).not.toContain(VALID_PASSWORD);
     expect(response.headers['cache-control']).toBe('no-store');
@@ -72,6 +80,10 @@ describe('POST /api/auth/register (e2e, base réelle locale de test)', () => {
     const rows = await prisma.user.findMany({ where: { username } });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.passwordHash.startsWith('$argon2id$')).toBe(true);
+
+    const sessions = await prisma.session.findMany({ where: { userId: rows[0]!.id } });
+    expect(sessions).toHaveLength(1);
+    expect(JSON.stringify(response.body)).not.toContain(sessions[0]!.secretHash);
   });
 
   it('rejects an empty body with field-level codes', async () => {

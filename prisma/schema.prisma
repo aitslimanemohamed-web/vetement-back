@@ -26,7 +26,7 @@ datasource db {
 /// Compte utilisateur (US-009) : uniquement nom d'utilisateur + mot de passe.
 /// Pas d'e-mail, de téléphone, d'annonce ni de profil dans ce périmètre.
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String    @id @default(uuid()) @db.Uuid
   /// Nom d'utilisateur normalisé (espaces de bord retirés, NFC), affiché tel
   /// quel — conserve sa casse d'origine.
   username     String
@@ -34,12 +34,44 @@ model User {
   /// indépendante de la langue, puis renormalisé en NFC. Voir
   /// src/auth/register/username-policy.ts pour la fonction exacte, qui doit
   /// rester le seul endroit où cette règle est implémentée.
-  usernameKey  String   @unique @map("username_key")
+  usernameKey  String    @unique @map("username_key")
   /// Empreinte Argon2id (jamais le mot de passe en clair, jamais réversible).
-  passwordHash String   @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  passwordHash String    @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  sessions     Session[]
 
   @@map("users")
+  @@schema("app")
+}
+
+/// Session serveur opaque (US-010) : jeton = "<id>.<secret>", seul un hachage
+/// du secret est stocké ici (voir src/auth/session/session.service.ts, seule
+/// source de vérité pour la génération/validation). Révocation par date
+/// (revokedAt), jamais par suppression de ligne — le rôle applicatif n'a
+/// d'ailleurs pas le droit DELETE sur cette table (voir la migration).
+model Session {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// SHA-256 du secret aléatoire (jamais le secret lui-même) — un hachage
+  /// rapide est volontaire ici : contrairement au mot de passe, ce secret a
+  /// une entropie élevée (256 bits générés par crypto.randomBytes), un
+  /// ralentissement type Argon2id n'apporterait rien et coûterait de la
+  /// latence sur CHAQUE requête authentifiée.
+  secretHash   String    @map("secret_hash")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Expiration absolue : 24h après création (valeur appliquée côté
+  /// application, voir session.service.ts).
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  /// Glissante : mise à jour à chaque validation réussie ; une session
+  /// inactive depuis plus de 2h est refusée même si expiresAt n'est pas
+  /// encore atteint (voir session.service.ts).
+  lastActiveAt DateTime  @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  /// Non nulle dès qu'une déconnexion (ou une future révocation) a eu lieu.
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  @@index([userId])
+  @@map("sessions")
   @@schema("app")
 }

@@ -19,6 +19,18 @@ export interface RegisteredAccount {
   createdAt: string;
 }
 
+interface PreparedAccount {
+  normalizedUsername: string;
+  usernameKey: string;
+  passwordHash: string;
+}
+
+// Client Prisma "utilisable pour une requête" : soit le client de premier
+// niveau (PrismaService), soit un client de transaction — voir
+// SessionService pour le même motif, utilisé pour créer le compte et sa
+// session dans la même transaction (US-010).
+type QueryClient = Pick<PrismaService, 'user'> | Prisma.TransactionClient;
+
 // Codes Prisma signalant que la base est temporairement injoignable (et non
 // une erreur de logique applicative) : voir
 // https://www.prisma.io/docs/orm/reference/error-reference
@@ -32,6 +44,16 @@ export class RegisterService {
   ) {}
 
   async register(rawUsername: unknown, rawPassword: unknown): Promise<RegisteredAccount> {
+    const prepared = await this.prepareAccount(rawUsername, rawPassword);
+    return this.insertAccount(this.prisma, prepared);
+  }
+
+  // Validation, vérification du mot de passe courant et hachage — aucune
+  // écriture en base ici. Volontairement séparé de l'insertion (voir
+  // insertAccount) pour que l'appelant (RegisterController, US-010) puisse
+  // ouvrir une transaction UNIQUEMENT pour les écritures réelles (compte +
+  // session), jamais pour un simple rejet de validation.
+  async prepareAccount(rawUsername: unknown, rawPassword: unknown): Promise<PreparedAccount> {
     const fieldErrors: RegisterFieldErrors = {};
 
     const usernameError = validateUsername(rawUsername);
@@ -64,12 +86,19 @@ export class RegisterService {
       throw new UnexpectedRegisterErrorException();
     }
 
+    return { normalizedUsername, usernameKey: key, passwordHash };
+  }
+
+  // Écriture seule, à partir d'un compte déjà validé/haché — `client` peut
+  // être un client de transaction pour rester cohérent avec une autre
+  // écriture (la session, voir RegisterController).
+  async insertAccount(client: QueryClient, prepared: PreparedAccount): Promise<RegisteredAccount> {
     try {
-      const user = await this.prisma.user.create({
+      const user = await client.user.create({
         data: {
-          username: normalizedUsername,
-          usernameKey: key,
-          passwordHash,
+          username: prepared.normalizedUsername,
+          usernameKey: prepared.usernameKey,
+          passwordHash: prepared.passwordHash,
         },
         select: { id: true, username: true, createdAt: true },
       });

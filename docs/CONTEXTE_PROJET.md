@@ -154,8 +154,8 @@ Informations vérifiées le **2026-09-07**.
 | Front-end web | Next.js 16 + TypeScript, page d'accueil publique trilingue (US-004) + zone de diagnostic | **Déployé et vérifié en ligne** : https://vetement-front.vercel.app |
 | Front-end mobile (iOS/Android) | Applications mobiles | Reporté (hors périmètre MVP) |
 | Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Déployé et vérifié en ligne** : https://vetement-back.onrender.com/api/health |
-| Base de données | PostgreSQL (Supabase) — table `app.users` (US-009) | **Déployée et vérifiée en ligne** — voir sous-section « Base de données » ci-dessous |
-| Authentification | Création de compte (nom d'utilisateur + mot de passe) | **Inscription réelle créée** (US-009) — connexion et sessions restent hors périmètre (voir questions ouvertes) |
+| Base de données | PostgreSQL (Supabase) — tables `app.users` (US-009), `app.sessions` (US-010) | **Vérifiée en local/CI** ; migration `sessions` écrite le 2026-09-08, pas encore appliquée sur le vrai projet Supabase (voir État réel, section E) |
+| Authentification | Création de compte (nom d'utilisateur + mot de passe), session automatique après inscription (US-010) | **Inscription + connexion automatique + espace protégé + déconnexion réels** (code vérifié en local/CI) — connexion d'un compte déjà existant reste le prochain ticket (voir questions ouvertes) |
 | Stockage des photos | Hébergement des photos d'annonces | Non créé |
 | Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Créé et vérifié** — voir sous-section « Hébergement » ci-dessous |
 
@@ -328,6 +328,104 @@ la création... ») distinct d'une erreur définitive lorsque la réponse est pe
 dépassé — jamais annoncé comme un échec certain. La contrainte unique en base empêche qu'une
 telle situation, suivie d'une nouvelle tentative de l'utilisateur, ne crée un second compte.
 
+### Sessions et connexion automatique (US-010)
+
+**Ce que le ticket change** : jusqu'ici, l'inscription (US-009) créait un compte mais ne
+connectait personne — l'utilisateur repartait anonyme. US-010 connecte automatiquement
+l'utilisateur après l'inscription, ouvre un espace protégé (`/<langue>/espace` : nom, avatar par
+défaut, déconnexion), et introduit une vraie session serveur.
+
+**Modèle de session — table `app.sessions`** (`prisma/migrations/20260908125817_add_sessions/`) :
+un jeton opaque `"<id>.<secret>"` — `id` sert de clé de recherche directe (indexée), le `secret`
+(32 octets aléatoires, `node:crypto`) n'est jamais stocké : seule son empreinte **SHA-256** l'est
+(`secret_hash`). Choix explicite de SHA-256 plutôt qu'Argon2id (contrairement au mot de passe,
+section précédente) : le secret a une entropie élevée (256 bits générés par un générateur
+cryptographique), un ralentissement volontaire de type Argon2id n'apporterait rien et ajouterait
+de la latence à **chaque requête authentifiée**, y compris `GET /api/auth/me`. Comparaison en
+temps constant (`crypto.timingSafeEqual`). Colonnes : `id`, `user_id` (FK `app.users`, cascade),
+`secret_hash`, `created_at`, `expires_at` (24h depuis la création), `last_active_at` (glissante,
+mise à jour à chaque validation réussie — une session inactive plus de 2h est refusée même si
+`expires_at` n'est pas atteinte), `revoked_at` (nullable — révocation par date, **jamais** par
+suppression de ligne). Droits `vetement_app` sur `app.sessions` : `SELECT, INSERT, UPDATE`
+seulement (pas de `DELETE`), vérifiés en local (`\dp app.sessions` → `vetement_app=arw`).
+
+**Transport du jeton — jamais un cookie côté NestJS** : le back ne lit qu'un en-tête
+`Authorization: Bearer <jeton>` (`SessionGuard`, `src/auth/session/`). Le seul cookie du
+navigateur (`vetement_session`, `HttpOnly`/`Secure`/`SameSite=Lax`) vit sur le domaine Vercel du
+front, jamais transmis tel quel à Render — c'est le relais Next.js qui le traduit en en-tête pour
+l'appel serveur-à-serveur. Conséquence utile : aucune nouvelle dépendance backend
+(`cookie-parser` non nécessaire).
+
+**Endpoints NestJS** :
+- `POST /api/auth/register` — inchangé pour le navigateur (jamais appelé directement par lui,
+  seulement par le relais Next.js) ; crée maintenant le compte ET sa session dans une même
+  transaction Prisma (`RegisterController`, `src/auth/register/register.controller.ts` —
+  validation/hachage restent hors transaction, seules les deux écritures y sont). Répond
+  `{status:'ACCOUNT_CREATED', user, session:{token, expiresAt}}` — le champ `session` n'est destiné
+  qu'à l'appelant serveur-à-serveur, jamais au navigateur final.
+- `GET /api/auth/me` — dérive l'utilisateur **uniquement** de la session validée
+  (`@CurrentSession()`), jamais d'un identifiant fourni par le client. `200 {status:'OK',
+  user:{id,username}}` ou `401 {status:'UNAUTHENTICATED'}` (absence, jeton mal formé, inconnu,
+  expiré, révoqué ou inactif trop longtemps — toutes ces causes sont indiscernables de
+  l'extérieur, volontairement). `Cache-Control: no-store`.
+- `POST /api/auth/logout` — **idempotent** : révoque si le jeton est présent et valide (exige la
+  preuve du secret, pas seulement l'identifiant de session — sinon connaître un id suffirait à
+  déconnecter quelqu'un d'autre de force), répond toujours `204`. Limité à 10 tentatives/minute/IP
+  (garde dédiée, même motif que l'inscription — pas de garde globale, pour ne pas compter une
+  requête deux fois comme rencontré en US-009).
+
+**Relais same-origin côté front** (`vetement-front/src/app/api/auth/{register,me,logout}/route.ts`) :
+le navigateur n'appelle plus jamais Render directement pour ces trois actions — il appelle son
+propre domaine Vercel, qui relaie l'appel serveur-à-serveur via `INTERNAL_API_URL` (nouvelle
+variable, réservée au serveur, jamais préfixée `NEXT_PUBLIC_`). Raison explicite du ticket :
+Vercel et Render sont deux domaines distincts, un cookie tiers serait bloqué sur Safari mobile.
+`NEXT_PUBLIC_API_URL` est conservée uniquement pour la zone de diagnostic (`StatusPanel`, appel
+direct navigateur→Render, sans conséquence de sécurité).
+
+**Protection CSRF — deux couches indépendantes, comme exigé explicitement par le ticket** (au-delà
+de `SameSite`/CORS seuls, référence explicite au OWASP CSRF Prevention Cheat Sheet) :
+1. Vérification stricte de l'origine (`Origin`, repli sur `Referer`) sur les routes relais qui
+   modifient un état (`src/lib/csrf.ts`).
+2. Jeton anti-CSRF à double dépôt : cookie `csrf_token` **non-**`HttpOnly` (lisible en JS,
+   c'est le principe du motif), émis pour **tout** visiteur — pas seulement connecté — dans
+   `src/proxy.ts`, pour aussi protéger l'inscription elle-même contre une CSRF de connexion
+   forcée ("login CSRF"). Comparé à l'en-tête `X-CSRF-Token` envoyé par le front.
+
+**Piège rencontré et corrigé pendant le développement** : le matcher de `src/proxy.ts` (middleware
+next-intl) couvrait initialement aussi `/api/*`, ce qui provoquait une redirection 307 erronée
+(`/api/auth/register` → `/fr/api/auth/register`) avant même d'atteindre la route. Diagnostiqué par
+un test manuel réel (`curl`) contre les serveurs de développement locaux, pas supposé ; corrigé en
+excluant `api` du matcher (`'/((?!api|_next|_vercel|.*\\..*).*)'`).
+
+**Distinction stricte de trois états, jamais confondus** (US-010, section 9) : `ok` (session
+valide), `unauthenticated` (le back a explicitement rejeté le jeton — seule cette réponse déclenche
+un retour à l'accueil avec « Votre session a expiré »), `unknown` (panne/délai — ne déconnecte
+JAMAIS un utilisateur légitime à tort, par exemple pendant un démarrage à froid de Render ; affiche
+un état d'attente et réessaie côté client, `SessionWatcher.tsx`, toutes les 60 secondes). Même
+motif à trois issues que `register-api.ts` (US-009) pour la cohérence.
+
+**Déconnexion multi-onglets sans échange de secret** : `BroadcastChannel('vetement-auth')` en
+mécanisme principal, repli sur `localStorage` + l'évènement natif `storage` (qui ne se déclenche
+que dans les autres onglets) si indisponible — jamais un jeton ou une donnée utilisateur transmis,
+seulement un signal (`src/lib/auth-broadcast.ts`).
+
+**Vérifié réellement en local (pas seulement en test automatisé)** : serveurs de développement
+démarrés (back sur :3099, front sur :3100, vraie base Postgres locale), parcours complet rejoué
+avec `curl` — inscription réelle → cookie `vetement_session` posé (`HttpOnly`, jamais le secret
+dans le JSON renvoyé au navigateur) → `/fr/espace` affiche le vrai nom d'utilisateur → `GET
+/api/auth/me` répond `200` → déconnexion → cookie effacé → `GET /api/auth/me` répond `401` →
+`/fr/espace` redirige de nouveau vers l'accueil. CSRF vérifié activement : une origine forgée
+(`Origin: https://attacker.example`) et une requête sans jeton anti-CSRF sont toutes deux
+refusées (`403 FORBIDDEN`).
+
+**Non vérifié par l'agent** (nécessite un navigateur réel ou l'infrastructure réelle, hors de
+portée des outils disponibles) : comportement réel sur Safari mobile (c'est la raison même du
+relais, mais son nécessaire ne peut être observé sans un vrai appareil) ; rendu visuel de l'avatar,
+de l'espace connecté et des messages dans les 3 langues ; comportement multi-onglets dans un vrai
+navigateur (les tests automatisés simulent les évènements `BroadcastChannel`/`storage`, pas un
+second onglet réel) ; migration `sessions` appliquée sur le vrai projet Supabase et recette en
+ligne complète (Vercel + Render) — voir État réel, section E, et Reprise, section I.
+
 ### Versions réellement installées (vérifié le 2026-09-07)
 
 | Outil / paquet | Version |
@@ -408,9 +506,19 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
   l'infrastructure réelle — un vrai compte créé via l'API en ligne avec l'origine Vercel réelle,
   vérifié en base puis nettoyé, et un doublon (exact et variante de casse) refusé (409). Détail
   complet en journal ci-dessous.
+- **US-010** — Connexion automatique après inscription, espace protégé (`/<langue>/espace`),
+  sessions serveur opaques (`app.sessions`), relais Next.js same-origin, CSRF (origine stricte +
+  double dépôt), déconnexion multi-onglets. **Important, à ne pas présenter comme plus terminé que
+  ça ne l'est** : tout le code est écrit, testé (58 tests back dont 25 e2e contre une vraie base
+  Postgres locale ; 95 tests front) et vérifié manuellement de bout en bout contre des serveurs de
+  développement locaux réels (voir sous-section « Sessions et connexion automatique », section D).
+  Ce qui n'a **pas** encore été fait : appliquer la migration `sessions` sur le vrai projet
+  Supabase, ajouter `INTERNAL_API_URL` sur Vercel, déployer, et rejouer la recette sur
+  l'infrastructure réelle — voir Reprise, section I, pour la suite exacte.
 
 **Prévu (pas commencé) :**
-- Connexion et sessions (hors périmètre explicite de US-009).
+- Connexion d'un utilisateur déjà inscrit (US-010 a créé la session ; se connecter à un compte
+  existant, sans passer par une nouvelle inscription, reste le prochain ticket explicite).
 - Vérification de la disponibilité d'un nom d'utilisateur (nécessite un point d'accès dédié,
   volontairement absent de US-009 pour ne pas exposer d'énumération des comptes).
 - Récupération de compte sans e-mail ni téléphone (voir question ouverte, section G).
@@ -512,6 +620,11 @@ CI (section D, sous-section Hébergement).
 | 2026-09-08 | Rôle Postgres applicatif (`vetement_app`, droits minimaux) distinct du rôle de migration | Exigence explicite du ticket ("séparer les droits de migration et d'exécution lorsque possible") ; vérifié réellement en local (`SELECT`+`INSERT` uniquement sur `app.users`). |
 | 2026-09-08 | CI (GitHub Actions) : ajout d'un conteneur Postgres jetable pour exécuter réellement les migrations et les tests end-to-end à chaque push | Les garanties les plus sensibles de US-009 (contrainte unique sous concurrence réelle, permissions du rôle applicatif) ne peuvent pas être vérifiées de façon fiable avec une base simulée ; ce conteneur est détruit à la fin de chaque exécution, sans lien avec Supabase. |
 | 2026-09-08 | Connexions Prisma via le champ natif `directUrl` (`DIRECT_URL`) plutôt qu'une variable `MIGRATE_DATABASE_URL` maison, et pooler Supavisor (transaction/session) plutôt qu'une connexion directe non poolée | Alignement sur la recommandation Supabase actuelle, découverte via le bouton "Connect → ORM" du dashboard réel du projet au moment de sa création — Supabase ne présente plus la connexion directe comme le choix par défaut. |
+| 2026-09-08 | Session (US-010) : jeton opaque `"<id>.<secret>"` stocké dans PostgreSQL, hachage **SHA-256** (pas Argon2id), jamais un JWT | Choix explicite du ticket (« session opaque conservée côté serveur dans PostgreSQL »). SHA-256 plutôt qu'Argon2id : le secret a une entropie élevée (CSPRNG), un ralentissement volontaire n'apporte rien et coûterait de la latence à chaque requête authentifiée — recommandation OWASP Session Management Cheat Sheet. |
+| 2026-09-08 | Transport du jeton de session vers NestJS via l'en-tête `Authorization: Bearer <jeton>`, jamais un cookie lu côté back | Le seul cookie du navigateur vit sur le domaine Vercel (posé par le relais Next.js) — NestJS n'a jamais besoin de lire un cookie, ce qui évite d'ajouter `cookie-parser` comme dépendance. |
+| 2026-09-08 | Relais same-origin Next.js (`src/app/api/auth/*`) entre le navigateur et l'API NestJS, nouvelle variable serveur `INTERNAL_API_URL` | Exigence explicite du ticket : Vercel et Render sont deux domaines distincts, un cookie tiers serait bloqué sur Safari mobile. `NEXT_PUBLIC_API_URL` reste réservée à la zone de diagnostic (appel direct navigateur→Render, sans conséquence de sécurité). |
+| 2026-09-08 | CSRF : vérification stricte de l'origine **et** jeton anti-CSRF à double dépôt (cookie `csrf_token` non-`HttpOnly`, émis pour tout visiteur dans `src/proxy.ts`) | Exigence explicite et littérale du ticket, avec citation OWASP CSRF Prevention Cheat Sheet : « ne pas considérer CORS ou SameSite seuls comme une protection complète ». Émis pour tout visiteur (pas seulement connecté) pour aussi couvrir l'inscription contre une CSRF de connexion forcée. |
+| 2026-09-08 | Diffusion de la déconnexion entre onglets via `BroadcastChannel`, avec repli `localStorage`/évènement `storage` | Exigence explicite du ticket (« sans échange de secret entre onglets ») ; les deux mécanismes ne transportent jamais de jeton ni de donnée utilisateur, seulement un signal. |
 
 ### Règle graphique à mémoriser (COR-006, 2026-09-07)
 
@@ -529,17 +642,23 @@ explicite de l'utilisateur.
 
 ### Questions ouvertes (aucune solution proposée ici ne vaut décision)
 
-- **Connexion et sessions** : mécanisme non choisi (JWT ? cookies de session ?) — hors périmètre
-  explicite de US-009, nécessaire pour que le bouton Connexion cesse d'être désactivé.
+- **Connexion d'un compte déjà existant** : le mécanisme de session (US-010) existe désormais et
+  est réutilisable tel quel — reste à écrire la page/API de connexion elle-même (formulaire nom
+  d'utilisateur + mot de passe, vérification, émission d'une session) pour que le bouton
+  Connexion cesse d'être désactivé. Prochain ticket explicite.
 - **Comment récupérer un compte sans e-mail ni téléphone ?** (soulevée explicitement par
-  US-007 puis à nouveau par US-009, toujours aucune réponse proposée — à trancher avant le
-  ticket de connexion).
+  US-007 puis à nouveau par US-009, toujours aucune réponse proposée — mise de côté par
+  l'utilisateur le 2026-09-08, à trancher avant le ticket de connexion ou après, selon décision).
 - Comment vérifier la disponibilité d'un nom d'utilisateur avant soumission (US-009 expose
   volontairement l'inscription sans route de ce type, pour ne pas permettre l'énumération des
   comptes existants — un point d'accès dédié, limité en fréquence, resterait à concevoir si ce
   besoin est confirmé).
 - **Divergence de comptage Unicode front/back** (points de code vs grappes de graphèmes) —
   documentée en section D, non résolue unilatéralement, à arbitrer explicitement.
+- **Durcissement différé (US-010)** : une clé partagée Vercel↔Render (`INTERNAL_API_KEY`)
+  empêcherait même l'origine légitime du front d'appeler NestJS directement (aujourd'hui, CORS ne
+  distingue pas « le relais appelle en votre nom » de « un script tournant sur votre propre page
+  appelle directement ») — non demandée par le ticket, notée comme piste future, pas implémentée.
 - **Sauvegardes de la base de données** : aucune stratégie définie — pas requis pour
   l'environnement de test actuel, mais bloquant avant un lancement réel.
 - **Évolution des offres gratuites** (Supabase, Render) : aucun engagement de coût pris au-delà
@@ -1123,6 +1242,66 @@ explicite de l'utilisateur.
   sans urgence.
 - **Travail restant** : aucun pour US-009. Voir la section « Reprise à la prochaine session »
   ci-dessous pour la suite du projet.
+
+### 2026-09-08 — US-010 — Connexion automatique après inscription, espace connecté, sessions
+
+- **Dépôts concernés** : vetement-back (modèle `Session`, migration, module `auth/session`,
+  transaction inscription+session) et vetement-front (relais `/api/auth/*`, page `/espace`,
+  `Header` connecté, CSRF, diffusion multi-onglets) ; ce fichier et les deux `README.md`.
+- **Résultat réalisé et vérifié (code écrit, testé, et rejoué contre de vrais serveurs locaux —
+  infrastructure Supabase/Render/Vercel réelle non encore mise à jour, voir « Travail restant »)** :
+  voir le détail technique complet en section D, sous-section « Sessions et connexion automatique
+  (US-010) » — modèle de session, endpoints, relais, CSRF, multi-onglets, tout y est déjà décrit,
+  pas répété ici.
+  - Formulaire d'inscription (`RegistrationForm.tsx`) : redirige désormais immédiatement vers
+    `/<langue>/espace` après un succès confirmé par le serveur, au lieu d'afficher un message et
+    de rester sur place — aucune étape où l'utilisateur ressaisirait ses identifiants.
+    `register-api.ts` appelle le relais de même origine (`/api/auth/register`) au lieu de Render
+    directement.
+  - `Header.tsx` (déjà un Server Component asynchrone) affiche désormais, quand une session est
+    valide, l'avatar, le nom réel et un bouton de déconnexion à la place des actions
+    Connexion/Inscription — sans coût réseau supplémentaire pour un visiteur anonyme (l'appel à
+    `/me` n'a lieu que si un cookie de session est présent).
+  - `/<langue>/inscription` redirige un visiteur déjà connecté vers `/<langue>/espace`.
+  - Icônes œil, traductions, palette claire, absence de motif de fond répété : tous conservés
+    sans modification (vérifié par relecture des fichiers concernés avant intervention).
+- **Vérifications effectuées (toutes réussies)** :
+  - Back : `type-check`, `lint` (0 erreur), 58 tests unitaires+e2e (dont 25 e2e contre une vraie
+    base Postgres locale relancée pour ce ticket — concurrence, jeton falsifié, session expirée
+    (24h) et inactive (2h), révocation idempotente, révocation impossible avec le seul
+    identifiant de session sans le secret, absence du secret dans toute réponse), `build`.
+  - Front : `type-check`, `lint` (0 erreur, mêmes 2 avertissements bénins déjà connus sur `<img>`),
+    95 tests (dont les nouveaux : CSRF, diffusion multi-onglets, `SessionWatcher`,
+    `LogoutButton`, `AuthStatusBanner`, `getSessionUser`), `build` (les routes `/`, `/inscription`
+    et `/espace` passent de statiques à dynamiques — attendu, elles dépendent désormais du cookie
+    de session par requête).
+  - **Recette manuelle réelle de bout en bout**, back et front démarrés en local (base Postgres
+    Docker jetable recréée pour l'occasion — voir « Changements encore locaux » de la section I,
+    désormais mise à jour) : inscription réelle via le relais → cookie `vetement_session` posé
+    (`HttpOnly`, secret absent du JSON renvoyé au navigateur, vérifié par lecture directe de la
+    réponse) → `/fr/espace` affiche le vrai nom → `GET /api/auth/me` répond `200` → déconnexion →
+    cookie effacé → `GET /api/auth/me` répond `401` → `/fr/espace` redirige de nouveau. CSRF
+    vérifié activement : une origine forgée et une requête sans jeton anti-CSRF sont toutes deux
+    refusées (`403`). Contenu de `app.sessions` inspecté directement en base après coup
+    (`revoked_at` correctement posé pour les sessions déconnectées).
+- **Bug réel trouvé et corrigé pendant cette recette manuelle** : le matcher de `src/proxy.ts`
+  (middleware next-intl) couvrait par défaut `/api/*`, provoquant une redirection `307` erronée
+  de `/api/auth/register` vers `/fr/api/auth/register` avant même d'atteindre la route — invisible
+  dans les tests automatisés (qui simulent le routeur), découvert uniquement par cette recette
+  manuelle réelle. Corrigé en excluant `api` du matcher.
+- **Effet de bord identifié et annulé** : démarrer `next dev` en local régénère automatiquement un
+  bloc `<!-- BEGIN:nextjs-agent-rules -->` dans `CLAUDE.md` (fonctionnalité native de Next.js 16,
+  sans rapport avec ce ticket) — retiré avant de considérer le dépôt propre, pour ne garder que
+  les changements réels de US-010.
+- **Travail restant (infrastructure réelle, pas le code)** : appliquer la migration `sessions` sur
+  le vrai projet Supabase (automatique via le Pre-Deploy Command déjà configuré sur Render, dès le
+  prochain déploiement — aucune action manuelle requise pour la migration elle-même) ; ajouter
+  `INTERNAL_API_URL` dans les variables d'environnement Vercel ; pousser les deux dépôts ; rejouer
+  la recette sur les URL réelles (`vetement-front.vercel.app`, `vetement-back.onrender.com`). Voir
+  section I pour la suite exacte — **rien de tout cela n'a été fait sans confirmation explicite de
+  l'utilisateur** (ni commit, ni push, ni déploiement à ce stade).
+- **Commits** : aucun — en attente de confirmation de l'utilisateur avant de committer/pousser
+  (voir section I).
 
 ## I. Reprise à la prochaine session
 
