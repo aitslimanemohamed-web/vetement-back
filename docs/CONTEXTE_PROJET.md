@@ -155,7 +155,7 @@ Informations vérifiées le **2026-09-07**.
 | Front-end mobile (iOS/Android) | Applications mobiles | Reporté (hors périmètre MVP) |
 | Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Déployé et vérifié en ligne** : https://vetement-back.onrender.com/api/health |
 | Base de données | PostgreSQL (Supabase) — tables `app.users` (US-009), `app.sessions` (US-010) | **Déployée et vérifiée en ligne** — voir sous-section « Sessions et connexion automatique » ci-dessous |
-| Authentification | Création de compte (nom d'utilisateur + mot de passe), session automatique après inscription (US-010) | **Inscription + connexion automatique + espace protégé + déconnexion réels, vérifiés de bout en bout en ligne** — connexion d'un compte déjà existant reste le prochain ticket (voir questions ouvertes) |
+| Authentification | Création de compte, session automatique après inscription (US-010), connexion d'un compte existant (US-011) | **Inscription, connexion, espace protégé et déconnexion réels, vérifiés de bout en bout en ligne** — récupération de compte et évolution de l'authentification avant production restent hors périmètre (voir questions ouvertes) |
 | Stockage des photos | Hébergement des photos d'annonces | Non créé |
 | Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Créé et vérifié** — voir sous-section « Hébergement » ci-dessous |
 
@@ -454,6 +454,63 @@ comportement réel sur Safari mobile (c'est la raison même du relais, mais son 
 messages dans les 3 langues ; comportement multi-onglets dans un vrai navigateur (les tests
 automatisés simulent les évènements `BroadcastChannel`/`storage`, pas un second onglet réel).
 
+### Connexion d'un compte existant (US-011)
+
+**Ce que le ticket change** : jusqu'ici, la seule façon d'obtenir une session était de créer un
+compte (US-010). US-011 ajoute `POST /api/auth/login` pour qu'un utilisateur déjà inscrit puisse
+se reconnecter — sans créer de second système d'authentification : même table `app.users`, même
+hachage Argon2id (`HashService`, inchangé), même `SessionService::create()` que l'inscription.
+
+**Nouveau module `src/auth/login/`** :
+- `login.service.ts` — `LoginService::login(username, password)` : vérifie que les deux champs
+  sont non vides (erreurs de champ distinctes si vide — pas un risque d'énumération, juste une
+  validation de formulaire standard), normalise le nom (réutilise `normalizeUsername`/
+  `usernameKey` de `username-policy.ts`, US-009), cherche le compte, puis vérifie le mot de passe
+  avec `HashService::verify()` — **sans** appliquer les règles de longueur/mot-de-passe-courant de
+  la création (US-011, section 3 : "Ne pas appliquer à la connexion les règles de création").
+- **Protection contre l'énumération de comptes, vérifiée par un test dédié** : nom inconnu et mot
+  de passe incorrect renvoient exactement la même réponse (`401 {status:'INVALID_CREDENTIALS'}`,
+  aucune indication de champ). Va plus loin que le message : si le compte n'existe pas,
+  `LoginService` compare quand même le mot de passe fourni contre une empreinte Argon2id **fixe**
+  précalculée au démarrage (`onModuleInit`, jamais celle d'un vrai compte) — sans cela, une
+  requête pour un nom inconnu répondrait plus vite (aucun hachage Argon2id à vérifier) qu'une
+  requête pour un nom existant avec un mauvais mot de passe, ce qui permettrait de deviner qu'un
+  nom existe rien qu'au temps de réponse.
+- `POST /api/auth/login` (`LoginController`) : pas de transaction nécessaire (contrairement à
+  l'inscription) — une seule écriture, la session ; le compte n'est jamais modifié par une
+  connexion. Réponse `{status:'LOGGED_IN', user:{id,username}, session:{token,expiresAt}}`, même
+  principe que l'inscription (`session` n'est lu que par le relais Next.js, jamais renvoyé au
+  navigateur). Limité à 5 tentatives/minute/IP — **seuil retenu : identique à l'inscription**,
+  valeur initiale ajustable, documentée ici comme demandé par le ticket (section 3).
+
+**Relais et page front** : `vetement-front/src/app/api/auth/login/route.ts`, motif strictement
+identique au relais d'inscription (CSRF, cookie posé par le relais, jamais le jeton brut au
+navigateur). Page `/<langue>/connexion` (`LoginForm.tsx`) : réutilise `AuthHeader` (logo, langue,
+« retour à l'accueil », déjà pensé pour ce cas dès US-007) et `PasswordField` (icône œil
+existante, US-007/COR-008) — aucun nouveau composant de champ créé. Aucune validation de
+format/longueur locale (contrairement à l'inscription) : seule la présence des deux champs est
+vérifiée côté front, cohérent avec le back. Succès → redirection immédiate vers `/espace`, même
+motif que l'inscription (US-010, section 2) : jamais d'étape où l'utilisateur ressaisirait ses
+identifiants.
+
+**Activation des liens existants** : le bouton « Connexion » de l'en-tête et le lien « Se
+connecter » en bas du formulaire d'inscription étaient désactivés (`DisabledActionButton`,
+légende « Bientôt disponible ») depuis US-007/US-009 — devenus de vrais liens vers `/connexion`.
+Les clés de traduction `header.comingSoon` et `registration.comingSoon`, devenues sans aucune
+utilisation après ce changement, ont été retirées des 3 langues (`DisabledActionButton` lui-même
+est conservé : composant générique réutilisable, pas spécifique à l'authentification).
+
+**Vérifié réellement en ligne (Vercel + Render + Supabase, le 2026-09-08)** : compte créé →
+déconnexion → réouverture de `/connexion` → reconnexion avec le même compte → cookie de session
+réel posé (`Secure`+`HttpOnly` en ligne) → `/espace` affiche le bon nom → `GET /api/auth/me`
+répond `200`. Nom inconnu et mot de passe incorrect vérifiés séparément : tous deux renvoient
+exactement `401 {status:'INVALID_CREDENTIALS'}`. Limitation de requêtes vérifiée en local
+(6 tentatives rapides → `429` après épuisement du seuil).
+
+**Non vérifié par l'agent** (nécessite un navigateur réel, hors de portée des outils disponibles) :
+comportement réel sur Safari mobile, rendu visuel/responsive/RTL réel de la page `/connexion`
+dans les 3 langues, confort tactile du champ mot de passe sur téléphone.
+
 ### Versions réellement installées (vérifié le 2026-09-07)
 
 | Outil / paquet | Version |
@@ -543,14 +600,19 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
   détail complet), `INTERNAL_API_URL` configurée sur Vercel, et recette rejouée avec succès sur
   l'infrastructure réelle (inscription → session → espace connecté → déconnexion → session
   révoquée, CSRF vérifié activement).
+- **US-011** — Connexion d'un compte existant (`POST /api/auth/login`, page `/<langue>/connexion`).
+  Réutilise entièrement le mécanisme US-009/US-010 (table, hachage, sessions) — aucun second
+  système d'authentification créé. Déployé et vérifié de bout en bout le 2026-09-08 : code testé
+  (66 tests back dont 31 e2e ; 115 tests front), recette rejouée avec succès sur l'infrastructure
+  réelle (inscription → déconnexion → reconnexion avec le même compte → espace affichant le bon
+  nom), protection anti-énumération vérifiée (nom inconnu et mot de passe incorrect indiscernables,
+  y compris par le temps de réponse) — voir sous-section « Connexion d'un compte existant »,
+  section D, pour le détail complet.
 
 **Prévu (pas commencé) :**
-- Connexion d'un utilisateur déjà inscrit (US-010 a créé la session ; se connecter à un compte
-  existant, sans passer par une nouvelle inscription, reste le prochain ticket explicite).
 - Vérification de la disponibilité d'un nom d'utilisateur (nécessite un point d'accès dédié,
   volontairement absent de US-009 pour ne pas exposer d'énumération des comptes).
 - Récupération de compte sans e-mail ni téléphone (voir question ouverte, section G).
-- Page de connexion (le bouton Connexion reste désactivé en attendant).
 - Choix du stockage des photos.
 - Tout développement fonctionnel (annonces, messagerie...).
 - Pages légales/contact et activation du référencement public (hors périmètre de
@@ -653,6 +715,10 @@ CI (section D, sous-section Hébergement).
 | 2026-09-08 | Relais same-origin Next.js (`src/app/api/auth/*`) entre le navigateur et l'API NestJS, nouvelle variable serveur `INTERNAL_API_URL` | Exigence explicite du ticket : Vercel et Render sont deux domaines distincts, un cookie tiers serait bloqué sur Safari mobile. `NEXT_PUBLIC_API_URL` reste réservée à la zone de diagnostic (appel direct navigateur→Render, sans conséquence de sécurité). |
 | 2026-09-08 | CSRF : vérification stricte de l'origine **et** jeton anti-CSRF à double dépôt (cookie `csrf_token` non-`HttpOnly`, émis pour tout visiteur dans `src/proxy.ts`) | Exigence explicite et littérale du ticket, avec citation OWASP CSRF Prevention Cheat Sheet : « ne pas considérer CORS ou SameSite seuls comme une protection complète ». Émis pour tout visiteur (pas seulement connecté) pour aussi couvrir l'inscription contre une CSRF de connexion forcée. |
 | 2026-09-08 | Diffusion de la déconnexion entre onglets via `BroadcastChannel`, avec repli `localStorage`/évènement `storage` | Exigence explicite du ticket (« sans échange de secret entre onglets ») ; les deux mécanismes ne transportent jamais de jeton ni de donnée utilisateur, seulement un signal. |
+| 2026-09-08 | Connexion (US-011) : aucun second système d'authentification — réutilise `app.users`, `HashService` et `SessionService` tels quels | Exigence explicite du ticket (« Ne pas créer un deuxième système d'authentification »). |
+| 2026-09-08 | Connexion : seuil de limitation identique à l'inscription (5 tentatives/minute/IP) | Choix explicite documenté ici comme demandé par le ticket (« documenter le seuil retenu ») ; pas de raison objective de différer de l'inscription pour une première version. |
+| 2026-09-08 | Connexion : comparaison de mot de passe exécutée même pour un nom d'utilisateur inconnu (contre une empreinte Argon2id fixe, jamais celle d'un vrai compte) | Va au-delà du message d'erreur générique déjà exigé par le ticket : sans cette comparaison factice, un nom inconnu répondrait plus vite qu'un mauvais mot de passe sur un compte réel, ce qui laisserait deviner l'existence d'un compte par le temps de réponse. |
+| 2026-09-08 | Page de connexion : réutilise `AuthHeader` et `PasswordField` tels quels, aucun nouveau composant de champ | `AuthHeader` avait été explicitement pensé pour ce cas dès US-007 (commentaire du code : « inscription, puis connexion ») ; `PasswordField` porte déjà l'icône œil exigée par le ticket. |
 
 ### Règle graphique à mémoriser (COR-006, 2026-09-07)
 
@@ -670,10 +736,6 @@ explicite de l'utilisateur.
 
 ### Questions ouvertes (aucune solution proposée ici ne vaut décision)
 
-- **Connexion d'un compte déjà existant** : le mécanisme de session (US-010) existe désormais et
-  est réutilisable tel quel — reste à écrire la page/API de connexion elle-même (formulaire nom
-  d'utilisateur + mot de passe, vérification, émission d'une session) pour que le bouton
-  Connexion cesse d'être désactivé. Prochain ticket explicite.
 - **Comment récupérer un compte sans e-mail ni téléphone ?** (soulevée explicitement par
   US-007 puis à nouveau par US-009, toujours aucune réponse proposée — mise de côté par
   l'utilisateur le 2026-09-08, à trancher avant le ticket de connexion ou après, selon décision).
@@ -1389,36 +1451,75 @@ explicite de l'utilisateur.
   de portée des outils disponibles ici, signalé plutôt que supposé correct.
 - **Commit** : `edc7cf5` (vetement-front).
 
+### 2026-09-08 — US-011 — Connexion d'un compte existant
+
+- **Dépôts concernés** : vetement-back (`src/auth/login/`, module `LoginModule`) et
+  vetement-front (`src/app/[locale]/connexion/`, `src/app/api/auth/login/`,
+  `src/features/auth/login/`, activation des liens Connexion existants) ; ce fichier et les deux
+  `README.md`.
+- **Résultat réalisé et vérifié** : voir le détail technique complet en section D, sous-section
+  « Connexion d'un compte existant (US-011) » — modèle réutilisé, protection anti-énumération,
+  relais, page, activation des liens, tout y est déjà décrit, pas répété ici.
+- **Vérifications effectuées (toutes réussies)** :
+  - Back : `type-check`, `lint` (0 erreur), 66 tests unitaires (dont 8 nouveaux pour
+    `LoginService` : validation des champs vides, empreinte factice pour un nom inconnu, même
+    erreur générique pour nom inconnu/mauvais mot de passe, jamais le hash renvoyé, panne base de
+    données), 31 tests e2e (dont 6 nouveaux contre une vraie base Postgres locale : connexion
+    réelle suivie d'un `/me` fonctionnel, nom inconnu et mauvais mot de passe strictement
+    indiscernables, insensibilité à la casse comme l'inscription, sessions multiples
+    indépendantes, limitation de requêtes avec `Retry-After`), `build`.
+  - Front : `type-check`, `lint` (0 erreur, mêmes 2 avertissements bénins déjà connus), 115 tests
+    (dont 19 nouveaux : `login-api.ts` et `LoginForm.tsx` — aucune validation de format locale
+    contrairement à l'inscription, message générique non lié à un champ pour des identifiants
+    incorrects, lien vers l'inscription), `build` (nouvelle route `/[locale]/connexion` et
+    `/api/auth/login`, toutes deux dynamiques comme attendu).
+  - **Recette manuelle réelle de bout en bout, deux fois** (local puis en ligne) : créer un
+    compte → se déconnecter → rouvrir `/connexion` → se reconnecter avec le même compte →
+    `/espace` affiche le bon nom → `GET /api/auth/me` répond `200`. Nom inconnu et mot de passe
+    incorrect vérifiés séparément : tous deux `401 {status:'INVALID_CREDENTIALS'}`, aucune
+    différence observable. Limitation de requêtes vérifiée en local (6 tentatives rapides → `429`
+    après épuisement du seuil, en-tête `Retry-After` présent).
+- **Nettoyage effectué en cours de route** : les clés de traduction `header.comingSoon` et
+  `registration.comingSoon`, devenues sans aucune utilisation après l'activation des liens
+  Connexion, ont été retirées des 3 langues ; le test `RegistrationForm.test.tsx` qui vérifiait
+  l'ancien état désactivé a été remplacé par un test vérifiant le vrai lien vers `/connexion`.
+  `DisabledActionButton` (le composant lui-même) est conservé, générique et potentiellement
+  réutilisable, bien que plus aucun appelant n'existe actuellement.
+- **Compte de test réel créé pendant la recette en ligne** (`e2e-us011-prod`) — fictif,
+  déconnecté après vérification, laissé en base sans urgence (même limite que d'habitude :
+  suppression réservée au rôle privilégié, à faire via l'éditeur SQL Supabase si souhaité).
+- **Limites persistantes, non corrigibles dans cet environnement** : comportement réel sur Safari
+  mobile, rendu visuel réel (captures d'écran, responsive, RTL) de la page `/connexion` dans les
+  3 langues — toujours hors de portée des outils disponibles ici.
+- **Commits** : `58bbdad` (vetement-back), `a9abfde` (vetement-front).
+
 ## I. Reprise à la prochaine session
 
 Rédigé le 2026-09-08, à la clôture volontaire de la session de travail (le projet sera repris
 plus tard, éventuellement par un autre intervenant humain ou IA). **Vérifié en direct au moment
 de la rédaction** (pas supposé) : les deux dépôts sont propres (`git status` sans changement non
-committé, hormis la mise à jour finale de ce fichier), les deux CI GitHub Actions les plus
-récentes sont vertes, le back répond en HTTPS avec le dernier commit, le front répond en HTTPS, et
-le parcours complet (inscription → session → espace connecté → déconnexion) fonctionne en ligne à
-l'instant de la rédaction — voir le détail en section H.
+committé, hormis la mise à jour finale de ce fichier), le back répond en HTTPS avec le dernier
+commit, le front répond en HTTPS, et le parcours complet (inscription → déconnexion → reconnexion
+→ espace connecté) fonctionne en ligne à l'instant de la rédaction — voir le détail en section H.
 
 ### Où nous nous sommes arrêtés
 
-**Aucun ticket n'est en cours.** Le dernier ticket traité (US-010 — connexion automatique après
-inscription, espace connecté, sessions serveur) est **terminé et vérifié de bout en bout**,
-infrastructure réelle comprise : table `app.sessions` créée sur le vrai projet Supabase, relais
-Next.js déployé sur Vercel avec `INTERNAL_API_URL` configurée, recette complète rejouée avec
-succès sur les URL réelles. Deux incidents réels rencontrés et corrigés pendant cette mise en
-ligne (matcher `proxy.ts` capturant `/api/*` à tort, RLS activé automatiquement sur `app.sessions`
-par l'éditeur SQL Supabase) — voir section H pour le détail complet, utile à connaître avant toute
-future migration appliquée manuellement. Le projet est dans un état stable et entièrement poussé —
-une prochaine session peut commencer un nouveau ticket sans reprise de travail interrompu.
+**Aucun ticket n'est en cours.** Le dernier ticket traité (US-011 — connexion d'un compte
+existant) est **terminé et vérifié de bout en bout**, infrastructure réelle comprise : aucune
+nouvelle migration nécessaire (réutilise `app.users`/`app.sessions` de US-009/US-010 tels quels),
+page `/<langue>/connexion` et relais déployés, recette complète (inscription → déconnexion →
+reconnexion → espace connecté) rejouée avec succès sur les URL réelles. Le projet est dans un état
+stable et entièrement poussé — une prochaine session peut commencer un nouveau ticket sans reprise
+de travail interrompu.
 
 ### Dernier travail réalisé et son résultat
 
-1. US-010 (fonctionnalité) : session serveur opaque, relais Next.js same-origin, page `/espace`
-   protégée, CSRF à deux couches, déconnexion multi-onglets — écrit, testé (153 tests au total
-   entre les deux dépôts), déployé et re-vérifié contre l'infrastructure réelle (Vercel + Render +
-   Supabase) — résultat : succès complet, recette en ligne exécutée intégralement.
-2. Diagnostic et correction de deux incidents réels de mise en ligne (voir section H) : matcher
-   `proxy.ts` trop large, RLS activé à tort sur une table créée via l'éditeur SQL Supabase.
+1. US-011 (fonctionnalité) : `POST /api/auth/login`, page `/connexion`, protection anti-
+   énumération (même erreur et même temps de réponse pour un nom inconnu ou un mauvais mot de
+   passe) — écrit, testé (181 tests au total entre les deux dépôts), déployé et re-vérifié contre
+   l'infrastructure réelle — résultat : succès complet, recette en ligne exécutée intégralement.
+2. Activation des liens « Connexion » qui restaient désactivés depuis US-007 (en-tête, bas du
+   formulaire d'inscription) ; nettoyage des traductions et du test devenus obsolètes de ce fait.
 
 ### Branches et commits utiles
 
@@ -1427,8 +1528,8 @@ aucun des deux dépôts au moment de la rédaction.
 
 | Dépôt | Dernier commit | Résumé |
 |---|---|---|
-| vetement-back | `b1381b8` (suivi d'une mise à jour de ce fichier, voir `git log -1`) | docs: record cleanup of the residual test accounts in Supabase |
-| vetement-front | `edc7cf5` | fix(US-010): explicit retry action, separate "my space" link, no-store |
+| vetement-back | `58bbdad` (suivi d'une mise à jour de ce fichier, voir `git log -1`) | feat(US-011): log in with an existing account |
+| vetement-front | `a9abfde` | feat(US-011): login page, activate the login links everywhere |
 
 **À la reprise, ne pas se fier uniquement à ce tableau** : exécuter `git log -1 --oneline` dans
 chaque dépôt pour confirmer le commit réellement présent, et comparer avec le commit affiché en
@@ -1451,6 +1552,9 @@ versionné, pointe vers ce même back local) — sans risque, mais à recréer s
 - **Divergence de comptage Unicode front/back** (grappes de graphèmes côté front US-007, points
   de code côté back US-009) — documentée en section D et G, jamais arbitrée. Risque limité à des
   noms d'utilisateur contenant des marques diacritiques combinantes.
+- **Un compte de test résiduel dans la vraie base Supabase** (`e2e-us011-prod`, créé pendant la
+  recette en ligne de US-011) — fictif, sans donnée sensible, suppressible uniquement via
+  `DIRECT_URL` (voir point suivant). Sans urgence.
 - **L'agent n'a plus accès à `DIRECT_URL`** (mot de passe Supabase tourné par l'utilisateur lors
   d'une session précédente, volontairement non retransmis). Toute opération nécessitant le rôle
   privilégié (nouvelle migration appliquée directement par l'agent, nettoyage direct en base)
@@ -1493,7 +1597,8 @@ versionné, pointe vers ce même back local) — sans risque, mais à recréer s
   ligne flex (cause réelle du bug corrigé en COR-008).
 - **Icônes œil intégrées** dans les champs de mot de passe (position absolue, zone tactile
   44×44px, `aria-label` traduit, jamais de texte visible ni d'emoji) — motif à reproduire pour
-  tout futur champ de mot de passe (page de connexion, etc.).
+  tout futur champ de mot de passe — motif désormais utilisé sur inscription ET connexion
+  (US-011).
 - **Icônes/avatars en SVG dessiné pour le projet** (US-010, `Avatar.tsx`) — même logique que les
   icônes œil, aucune bibliothèque d'icônes à ajouter pour de futurs pictogrammes simples.
 
@@ -1501,18 +1606,17 @@ versionné, pointe vers ce même back local) — sans risque, mais à recréer s
 
 Par ordre plausible, sans engagement — à confirmer par l'utilisateur avant de commencer l'une
 d'entre elles :
-1. Connexion d'un utilisateur déjà inscrit — le mécanisme de session existe désormais (US-010) et
-   est directement réutilisable ; reste à écrire la page/API de connexion elle-même (le bouton
-   Connexion de l'accueil est prêt, juste désactivé).
-2. Décider d'une méthode de récupération de compte sans e-mail ni téléphone (question ouverte
-   posée par deux tickets consécutifs, mise de côté explicitement par l'utilisateur cette
-   session — à reprendre après la connexion).
-3. Décider si un point d'accès de vérification de disponibilité du nom d'utilisateur est
+1. Décider d'une méthode de récupération de compte sans e-mail ni téléphone (question ouverte
+   posée par plusieurs tickets consécutifs, toujours mise de côté — l'authentification de base
+   étant maintenant complète : inscription, session, connexion).
+2. Décider si un point d'accès de vérification de disponibilité du nom d'utilisateur est
    nécessaire (compromis avec le risque d'énumération des comptes, volontairement évité jusqu'ici).
-4. Arbitrer la divergence de comptage Unicode front/back.
-5. Élucider pourquoi le Pre-Deploy Command Render n'a pas appliqué la migration `sessions` (voir
-   « Problèmes connus » ci-dessus), avant qu'une prochaine migration ne rencontre le même sort.
-6. Premier développement fonctionnel produit (annonces) une fois l'authentification complète.
+3. Arbitrer la divergence de comptage Unicode front/back.
+4. Élucider pourquoi le Pre-Deploy Command Render n'a pas appliqué la migration `sessions` lors de
+   US-010 (voir « Problèmes connus » ci-dessus), avant qu'une prochaine migration ne rencontre le
+   même sort.
+5. Premier développement fonctionnel produit (annonces) maintenant que l'authentification de base
+   est complète.
 
 ### Décisions à demander à l'utilisateur avant de poursuivre
 

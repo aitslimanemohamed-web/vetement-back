@@ -52,20 +52,24 @@ npm run db:migrate:deploy    # applique les migrations versionnées (prisma/migr
   `docs/CONTEXTE_PROJET.md` pour le contrat complet (codes de réponse, règles de validation,
   hachage). N'est appelée que par le relais Next.js du front, jamais directement par un
   navigateur.
+- `POST /api/auth/login` — connecte un compte existant (nom d'utilisateur + mot de passe),
+  réutilise le même hachage et le même mécanisme de session que l'inscription (aucun second
+  système d'authentification). Nom inconnu et mot de passe incorrect renvoient exactement la même
+  réponse (y compris en temps de réponse — comparaison exécutée même pour un compte inexistant),
+  pour ne jamais laisser deviner qu'un nom d'utilisateur existe. Limité à 5 tentatives/minute/IP.
 - `GET /api/auth/me` — retourne le compte derrière une session valide (`Authorization: Bearer
   <jeton>`), dérivé uniquement de la session, jamais d'un identifiant fourni par l'appelant.
 - `POST /api/auth/logout` — révoque une session (idempotent), limité à 10 tentatives/minute/IP.
 
 ## État actuel
 
-Le serveur démarre, expose `GET /api/health`, `POST /api/auth/register`, `GET /api/auth/me` et
-`POST /api/auth/logout`, et autorise les appels du front-end via CORS (origine configurable).
-Déployé et vérifié en ligne (Render, plan gratuit) : https://vetement-back.onrender.com/api/health
-— voir `docs/CONTEXTE_PROJET.md` pour le détail et les limites connues (mise en veille après
-inactivité). L'inscription crée un vrai compte et une vraie session (opaque, stockée dans
-PostgreSQL — `app.users` et `app.sessions`, Supabase, plan gratuit) ; la connexion d'un compte
-déjà existant reste le prochain ticket — voir le fichier de référence pour le détail exact de ce
-qui est réalisé, prévu ou bloqué.
+Le serveur démarre, expose `GET /api/health`, `POST /api/auth/register`, `POST /api/auth/login`,
+`GET /api/auth/me` et `POST /api/auth/logout`, et autorise les appels du front-end via CORS
+(origine configurable). Déployé et vérifié en ligne (Render, plan gratuit) :
+https://vetement-back.onrender.com/api/health — voir `docs/CONTEXTE_PROJET.md` pour le détail et
+les limites connues (mise en veille après inactivité). Inscription, connexion, session et
+déconnexion sont toutes réelles, vérifiées de bout en bout en ligne — voir le fichier de référence
+pour le détail exact de ce qui est réalisé, prévu ou bloqué.
 
 ## Dossier `database/`
 
