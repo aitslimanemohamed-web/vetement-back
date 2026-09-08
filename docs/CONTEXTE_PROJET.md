@@ -156,8 +156,8 @@ Informations vérifiées le **2026-09-07**.
 | Front-end web | Next.js 16 + TypeScript, page d'accueil publique trilingue (US-004) + zone de diagnostic | **Déployé et vérifié en ligne** : https://vetement-front.vercel.app |
 | Front-end mobile (iOS/Android) | Applications mobiles | Reporté (hors périmètre MVP) |
 | Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Déployé et vérifié en ligne** : https://vetement-back.onrender.com/api/health |
-| Base de données | Stockage des annonces, utilisateurs, messages... | Non créée (non nécessaire pour le périmètre actuel) |
-| Authentification | Vérification d'identité des utilisateurs | Non créée — méthode non choisie |
+| Base de données | PostgreSQL (Supabase) — table `app.users` (US-009) | **Code prêt et testé en local** (vraie base Postgres locale) ; **pas encore raccordé à un vrai projet Supabase** — voir sous-section « Base de données » et section E |
+| Authentification | Création de compte (nom d'utilisateur + mot de passe) | **Inscription réelle créée** (US-009) — connexion et sessions restent hors périmètre (voir questions ouvertes) |
 | Stockage des photos | Hébergement des photos d'annonces | Non créé |
 | Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Créé et vérifié** — voir sous-section « Hébergement » ci-dessous |
 
@@ -186,6 +186,136 @@ tant qu'un composant n'a pas été réellement mis en place et vérifié, il res
 - Version de commit affichée automatiquement à chaque déploiement, sans étape manuelle :
   `RENDER_GIT_COMMIT` (back) / `VERCEL_GIT_COMMIT_SHA` (front), tronqués à 7 caractères.
 
+### Base de données (US-009)
+
+**Choix validé : PostgreSQL hébergé sur Supabase, offre gratuite, pour l'environnement de
+test.** Supabase sert uniquement d'hébergeur PostgreSQL — **Supabase Auth n'est pas utilisé**,
+l'inscription est gérée entièrement par NestJS. Le navigateur ne se connecte jamais directement
+à la base.
+
+**Projet Supabase réel : à créer avec l'utilisateur — non encore fait au moment de la
+rédaction.** Cette sous-section sera complétée (référence de projet, région) une fois le projet
+créé ; aucune information n'est inventée ici en attendant.
+
+**Outil de migrations : [Prisma](https://www.prisma.io/) (`prisma migrate`).** Aucun outil de
+migration n'existait avant ce ticket ; Prisma a été choisi pour sa prise en charge native de
+PostgreSQL et son historique de migrations versionné et rejouable (`prisma/migrations/`,
+table `_prisma_migrations`), qui correspond exactement à l'exigence du ticket. Un seul outil de
+migration dans ce dépôt — ne pas en ajouter un second.
+
+**Schéma** : `prisma/schema.prisma` — un seul modèle, `User`, mappé sur la table `app.users`
+(schéma Postgres `app`, **pas `public`**) :
+
+| Colonne | Rôle |
+|---|---|
+| `id` | UUID, généré côté application (Prisma), clé primaire |
+| `username` | Nom d'utilisateur normalisé (espaces de bord retirés, NFC), casse d'affichage conservée |
+| `username_key` | Clé d'unicité : `username` mis en minuscules indépendamment de la langue, renormalisé en NFC — **contrainte unique en base**, pas une simple vérification préalable |
+| `password_hash` | Empreinte Argon2id uniquement — jamais le mot de passe |
+| `created_at`, `updated_at` | Horodatages avec fuseau horaire |
+
+Pourquoi le schéma `app` plutôt que `public` : la Data API Supabase (PostgREST) n'expose que le
+schéma `public` par défaut, donc `app.users` en est invisible sans configuration
+supplémentaire. En défense en profondeur, la migration révoque aussi explicitement tout accès à ce
+schéma pour les rôles publics Supabase `anon` et `authenticated` (dans un bloc conditionnel :
+ces rôles n'existent pas sur un Postgres local/CI ordinaire, donc la migration reste
+utilisable partout).
+
+**Deux connexions distinctes (séparation des droits de migration et d'exécution)** :
+
+| Variable | Rôle Postgres | Utilisée par | Droits |
+|---|---|---|---|
+| `MIGRATE_DATABASE_URL` | Rôle privilégié Supabase (ex. `postgres`) | `npm run db:migrate:deploy` uniquement, jamais par le serveur en exécution | Création de schéma/table, `GRANT`/`REVOKE` |
+| `DATABASE_URL` | `vetement_app` (créé par la migration) | Le serveur NestJS en exécution | **`USAGE` sur le schéma `app` + `SELECT`, `INSERT` sur `app.users` uniquement** — vérifié réellement en local (`\dp app.users`), ni `UPDATE` ni `DELETE` |
+
+Connexion Postgres recommandée pour Supabase (à confirmer une fois le projet créé, voir la
+[documentation Supabase](https://supabase.com/docs/guides/database/connecting-to-postgres)) :
+connexion **directe** (port 5432, sans pooler) pour `MIGRATE_DATABASE_URL` (les migrations et
+leurs verrous consultatifs ne fonctionnent pas de façon fiable derrière un pooler en mode
+transaction) ; connexion **poolée Supavisor** (port 6543, `?pgbouncer=true`) pour `DATABASE_URL`
+en exécution. Chiffrement TLS par défaut de Supabase conservé tel quel — **la vérification du
+certificat n'est jamais désactivée**.
+
+**Mot de passe du rôle `vetement_app`** : fixé une seule fois, manuellement, via
+`ALTER ROLE "vetement_app" WITH PASSWORD '...'` exécuté directement dans l'éditeur SQL Supabase
+(ou via `prisma db execute`) — **jamais écrit dans un fichier versionné** ; la migration crée le
+rôle sans mot de passe (`CREATE ROLE ... LOGIN`, sans clause `PASSWORD`).
+
+**Commandes** :
+```
+npm run db:migrate:deploy   # applique prisma/migrations/ (DATABASE_URL doit temporairement
+                             # pointer vers le rôle privilégié pour cette seule commande, ex. :
+                             # DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma migrate deploy)
+npx prisma generate         # régénère le client (aussi automatique via le script "postinstall")
+```
+Sur Render : la commande de migration est configurée comme **Pre-Deploy Command** (exécutée
+avant que la nouvelle version ne prenne le trafic ; un échec bloque le déploiement — exigence du
+ticket). Exactement :
+```
+DATABASE_URL="$MIGRATE_DATABASE_URL" npx prisma migrate deploy
+```
+
+**Règles de normalisation et d'unicité du nom d'utilisateur** (`src/auth/register/username-policy.ts`,
+seule source de vérité, à réutiliser telle quelle pour la connexion future) : 3 à 30 caractères,
+lettres Unicode + marques diacritiques + chiffres + tiret/tiret bas, au moins une lettre ou un
+chiffre, aucun espace interne, espaces de bord retirés, normalisation NFC. Clé d'unicité =
+version normalisée, mise en minuscules indépendamment de la langue (`toLowerCase()`, jamais
+`toLocaleLowerCase()`), puis renormalisée en NFC. `Karim`, `karim` et `KARIM` partagent la même
+clé ; les accents restent significatifs.
+
+**⚠️ Divergence documentée, non résolue unilatéralement** : le ticket back-end (US-009) impose
+de compter les caractères en **points de code Unicode** (`Array.from(...).length`), alors que le
+ticket front-end (US-007) impose de compter en **grappes de graphèmes** (`Intl.Segmenter`). Les
+deux côtés appliquent chacun leur propre règle, explicitement écrite dans leur ticket respectif
+— ce n'est pas un oubli. Conséquence concrète : un nom d'utilisateur contenant une marque
+diacritique combinante (voyellation arabe, accent latin décomposé) peut être compté
+différemment par le front et le back, et pourrait donc être accepté par l'un et refusé par
+l'autre dans un cas limite. Signalé ici pour arbitrage explicite par l'utilisateur ; aucune
+tentative d'harmonisation silencieuse n'a été faite.
+
+**Politique de mot de passe** (`src/auth/register/password-policy.ts`) : 15 à 128 points de
+code Unicode, aucune règle de composition imposée, aucune transformation. Rejet supplémentaire
+si le mot de passe figure exactement dans une liste locale de mots de passe courants
+(`src/auth/register/common-passwords.ts`, ~50 entrées composées à la main pour cet environnement
+de test, provenance et limites documentées dans le fichier lui-même — à remplacer par une source
+dédiée avant un lancement réel).
+
+**Hachage** : [argon2](https://www.npmjs.com/package/argon2) (`src/auth/register/hash.service.ts`),
+Argon2id, `memoryCost = 19456` Kio (19 Mio), `timeCost = 2`, `parallelism = 1`, sel aléatoire
+généré par la bibliothèque à chaque appel — vérifié réellement : deux comptes créés avec le même
+mot de passe ont des empreintes différentes, et l'empreinte stockée est correctement vérifiée
+avec `argon2.verify()`.
+
+**Contrat de l'API d'inscription** : `POST /api/auth/register`, corps `{ username, password }`
+uniquement (propriétés inattendues rejetées, corps limité à 8 Ko).
+
+| HTTP | `status` | Signification |
+|---|---|---|
+| 201 | `ACCOUNT_CREATED` | Compte créé — réponse limitée à `{ id, username, createdAt }` |
+| 400 | `VALIDATION_ERROR` | `fieldErrors: { username?, password? }` avec un code par champ (ex. `USERNAME_LENGTH`), traduisibles côté front |
+| 400 | `PASSWORD_TOO_COMMON` | Mot de passe dans la liste locale |
+| 409 | `USERNAME_TAKEN` | Contrainte unique violée (vraie violation DB, pas une recherche préalable) |
+| 429 | `RATE_LIMITED` | En-tête `Retry-After` inclus |
+| 503 | `SERVICE_UNAVAILABLE` | Base injoignable — vérifié réellement (base arrêtée volontairement pendant un test), `GET /api/health` reste inchangé pendant ce temps |
+| 500 | `INTERNAL_ERROR` | Erreur inattendue, jamais de détail interne dans la réponse |
+
+Jamais de mot de passe, d'empreinte, de requête SQL ni de trace interne dans une réponse ou un
+journal. Réponses non mises en cache (`Cache-Control: no-store`).
+
+**Limitation de requêtes** : 5 tentatives/minute/IP (`@nestjs/throttler`), stockage **en
+mémoire** — remis à zéro à chaque redémarrage du serveur, **non partagé si plusieurs instances**
+tournaient en parallèle (non applicable au plan Render actuel, une seule instance). Adresse IP
+lue via `req.ip`, fiable uniquement parce que `app.set('trust proxy', 1)` est configuré dans
+`main.ts` pour le proxy inverse de Render — sans ce réglage, l'IP serait celle du proxy, pas
+celle du visiteur, et la limite serait inefficace.
+
+**Gestion des délais Render (plan gratuit)** : le front affiche « Le serveur démarre peut-être,
+merci de patienter » après 10 s d'attente, abandonne après 90 s, n'effectue **aucune
+nouvelle tentative automatique**, et affiche un message dédié (« nous n'avons pas pu confirmer
+la création... ») distinct d'une erreur définitive lorsque la réponse est perdue ou le délai
+dépassé — jamais annoncé comme un échec certain. La contrainte unique en base empêche qu'une
+telle situation, suivie d'une nouvelle tentative de l'utilisateur, ne crée un second compte.
+
 ### Versions réellement installées (vérifié le 2026-09-07)
 
 | Outil / paquet | Version |
@@ -200,6 +330,10 @@ tant qu'un composant n'a pas été réellement mis en place et vérifié, il res
 | Vitest (tests back) | ^4.1.2 |
 | next-intl (routage/traductions front, US-004) | ^4.14.2 |
 | Vitest + Testing Library (tests front, US-004) | vitest ^4.1.11, @testing-library/react ^16.3.3 |
+| Prisma / @prisma/client (base de données back, US-009) | ^6.19.3 (volontairement pas la 7.x/8.x, qui exigent Node ≥ 20.19/22.12/24 — incompatible avec le Node 23 de ce poste) |
+| argon2 (hachage des mots de passe, US-009) | ^0.45.1 |
+| @nestjs/throttler (limitation de requêtes, US-009) | ^6.5.0 |
+| class-validator / class-transformer (validation des requêtes, US-009) | ^0.15.1 / ^0.5.1 |
 
 **Limite connue** : Node v23 n'est pas une version LTS ; `npm warn EBADENGINE` apparaît lors de
 l'installation pour quelques dépendances qui préfèrent Node 20/22/24 LTS. Aucune erreur
@@ -251,13 +385,27 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
   (nom d'utilisateur, mot de passe, confirmation), atteignable depuis le bouton Inscription de
   l'accueil désormais activé. Aucun compte réellement créé, aucun appel réseau. Détail complet
   en journal ci-dessous.
+- **COR-008** — Débordement horizontal mobile de l'inscription corrigé (cause réelle : bouton
+  texte non rétrécissable dans une ligne flex, pas le conteneur) ; boutons afficher/masquer
+  remplacés par des icônes œil intégrées au champ, avec zone tactile de 44px. Détail complet en
+  journal ci-dessous.
+
+**En cours (code prêt et testé en local, infrastructure réelle non encore raccordée) :**
+- **US-009** — API d'inscription réelle (`POST /api/auth/register`), NestJS + Prisma +
+  PostgreSQL + Argon2id, entièrement écrite et vérifiée contre une vraie base Postgres locale
+  (pas Supabase) : création réelle, unicité en base sous concurrence réelle, rejet des mots de
+  passe courants, limitation de requêtes, dégradation propre (503) si la base est injoignable.
+  Formulaire front raccordé pour de vrai (plus de message de succès local). **Ce qui manque
+  avant de considérer ce ticket terminé** : création du projet Supabase réel, application des
+  migrations dessus, configuration des variables secrètes sur Render, déploiement, et recette
+  complète en ligne (création d'un compte fictif depuis Vercel, vérification en base, refus
+  d'un doublon) — voir section D (sous-section Base de données) et journal ci-dessous pour le
+  détail exact de ce qui est fait et de ce qui reste bloqué par l'accès à cette infrastructure.
 
 **Prévu (pas commencé) :**
-- Conception de la base de données.
-- Back-end d'authentification réel (réception et vérification des identifiants, hachage du mot
-  de passe, création de session/jeton, stockage) — l'interface d'inscription existe (US-007)
-  mais ne parle à aucun serveur.
-- Vérification de la disponibilité d'un nom d'utilisateur (nécessite le back-end).
+- Connexion et sessions (hors périmètre explicite de US-009).
+- Vérification de la disponibilité d'un nom d'utilisateur (nécessite un point d'accès dédié,
+  volontairement absent de US-009 pour ne pas exposer d'énumération des comptes).
 - Récupération de compte sans e-mail ni téléphone (voir question ouverte, section G).
 - Page de connexion (le bouton Connexion reste désactivé en attendant).
 - Choix du stockage des photos.
@@ -265,9 +413,11 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
 - Pages légales/contact et activation du référencement public (hors périmètre de
   l'environnement de test actuel).
 - Nom de marque définitif (« Vetement » reste provisoire — voir section G).
+- Stratégie de sauvegarde de la base de données (nécessaire avant un lancement réel, pas avant).
 
 **Bloqué :**
-- Aucun blocage actif au moment de la rédaction.
+- US-009, partie infrastructure — en attente de la création du projet Supabase par
+  l'utilisateur (voir section D et journal) ; aucun secret ne peut être créé par l'agent.
 
 ## F. Reprise du travail
 
@@ -335,8 +485,13 @@ CI (section D, sous-section Hébergement).
 | 2026-09-07 | Nouvelle palette claire (vert `#006233`/`#004d28`, blanc cassé `#f8faf9`, vert très pâle `#eaf4ee`, rouge `#c62828` ponctuel, gris `#d8e2dc`) remplace l'ancienne palette sable/doré | Corrige les associations vert-sur-doré peu lisibles signalées par l'utilisateur ; contrastes mesurés (voir section H, COR-005) : minimum 5,36:1 sur les paires texte/fond réellement utilisées, objectif ≥ 4,5:1 tenu. |
 | 2026-09-07 | Motifs géométriques répétés (étoiles) retirés des fonds de section, remplacés par des fonds unis | Demandé explicitement par l'utilisateur (COR-006) — voir la règle graphique ci-dessous, qui remplace la décision TECH-003/US-004 d'utiliser un motif géométrique décoratif inspiré du zellige. |
 | 2026-09-07 | Inscription (US-007) : **nom d'utilisateur + mot de passe** uniquement, pas d'e-mail/téléphone/connexion tierce | Choix explicite du ticket US-007. Politique du mot de passe (15-128 caractères, pas de composition imposée) alignée sur la [recommandation OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html) citée par le ticket, privilégiant la longueur sans second facteur. |
-| 2026-09-07 | Comptage des caractères par **grappe de graphèmes Unicode** (`Intl.Segmenter`, repli sur `Array.from`) pour les limites de longueur du nom d'utilisateur et du mot de passe | Une lettre de base + une marque diacritique combinante (voyellation arabe, accent latin décomposé) doit compter comme un seul caractère pour l'utilisateur ; à reproduire à l'identique côté back-end pour que les deux validations restent cohérentes. |
+| 2026-09-07 | Comptage des caractères par **grappe de graphèmes Unicode** (`Intl.Segmenter`, repli sur `Array.from`) côté front (US-007) | Une lettre de base + une marque diacritique combinante (voyellation arabe, accent latin décomposé) doit compter comme un seul caractère pour l'utilisateur. **Non reproduit côté back** : voir la décision suivante et la divergence documentée en section D. |
 | 2026-09-08 | Icônes œil/œil barré du mot de passe : **SVG original dessiné pour le projet**, aucune bibliothèque d'icônes ajoutée | Choix explicite du ticket COR-008 (« bibliothèque déjà présente, ou SVG simple » — aucune bibliothèque d'icônes n'était présente) ; évite une dépendance supplémentaire pour deux icônes. |
+| 2026-09-08 | Base de données : **PostgreSQL sur Supabase, offre gratuite** (US-009) | Choix explicite du ticket US-009. Supabase sert uniquement d'hébergeur PostgreSQL — Supabase Auth volontairement non utilisé, l'inscription est gérée par NestJS (exigence explicite du ticket). |
+| 2026-09-08 | **Prisma** ajouté comme outil de migrations et ORM | Choix explicite requis par le ticket ("réutiliser l'outil existant, sinon en choisir un") ; aucun outil de migration n'existait avant ce ticket. Support natif de PostgreSQL et historique de migrations versionné correspondant exactement à l'exigence du ticket. |
+| 2026-09-08 | Comptage des caractères en **points de code Unicode** (`Array.from`, pas grappes de graphèmes) côté back (US-009) | Choix explicite et littéral du ticket back-end, qui diffère volontairement de la règle front (US-007, ci-dessus). Divergence signalée à l'utilisateur pour arbitrage plutôt que réconciliée silencieusement — voir section D et questions ouvertes. |
+| 2026-09-08 | Rôle Postgres applicatif (`vetement_app`, droits minimaux) distinct du rôle de migration | Exigence explicite du ticket ("séparer les droits de migration et d'exécution lorsque possible") ; vérifié réellement en local (`SELECT`+`INSERT` uniquement sur `app.users`). |
+| 2026-09-08 | CI (GitHub Actions) : ajout d'un conteneur Postgres jetable pour exécuter réellement les migrations et les tests end-to-end à chaque push | Les garanties les plus sensibles de US-009 (contrainte unique sous concurrence réelle, permissions du rôle applicatif) ne peuvent pas être vérifiées de façon fiable avec une base simulée ; ce conteneur est détruit à la fin de chaque exécution, sans lien avec Supabase. |
 
 ### Règle graphique à mémoriser (COR-006, 2026-09-07)
 
@@ -354,14 +509,23 @@ explicite de l'utilisateur.
 
 ### Questions ouvertes (aucune solution proposée ici ne vaut décision)
 
-- Quel mécanisme d'authentification côté back-end (stockage, hachage, sessions/jetons) ?
-  L'interface (nom d'utilisateur + mot de passe) est fixée par US-007, pas le back-end.
+- **Connexion et sessions** : mécanisme non choisi (JWT ? cookies de session ?) — hors périmètre
+  explicite de US-009, nécessaire pour que le bouton Connexion cesse d'être désactivé.
 - **Comment récupérer un compte sans e-mail ni téléphone ?** (soulevée explicitement par
-  US-007, aucune réponse proposée à ce stade — à trancher avant le ticket back-end
-  d'authentification).
-- Comment vérifier la disponibilité d'un nom d'utilisateur (nécessite un back-end ; US-007
-  affiche volontairement une aide de format mais jamais « Nom disponible »).
-- Quel hébergement pour la base de données et le stockage des photos (hors périmètre TECH-003) ?
+  US-007 puis à nouveau par US-009, toujours aucune réponse proposée — à trancher avant le
+  ticket de connexion).
+- Comment vérifier la disponibilité d'un nom d'utilisateur avant soumission (US-009 expose
+  volontairement l'inscription sans route de ce type, pour ne pas permettre l'énumération des
+  comptes existants — un point d'accès dédié, limité en fréquence, resterait à concevoir si ce
+  besoin est confirmé).
+- **Divergence de comptage Unicode front/back** (points de code vs grappes de graphèmes) —
+  documentée en section D, non résolue unilatéralement, à arbitrer explicitement.
+- **Sauvegardes de la base de données** : aucune stratégie définie — pas requis pour
+  l'environnement de test actuel, mais bloquant avant un lancement réel.
+- **Évolution des offres gratuites** (Supabase, Render) : aucun engagement de coût pris au-delà
+  de la validation initiale (0 €) — à revoir si les limites gratuites sont atteintes (lignes,
+  connexions simultanées, mise en veille).
+- Quel hébergement pour le stockage des photos (hors périmètre actuel) ?
 - Quelle durée exacte avant expiration d'une réservation ?
 - Quels rayons/filtres de recherche géographique exacts ?
 - Quelles options exactes de visibilité de la localisation ?
@@ -778,3 +942,97 @@ explicite de l'utilisateur.
 - **Commit** : `87af400` (vetement-front).
 - **Travail restant** : contrôle visuel humain multi-largeurs et captures d'écran (voir
   ci-dessus) ; le reste du périmètre COR-008 est livré.
+
+### 2026-09-08 — US-009 — Créer réellement les comptes (code prêt, infrastructure Supabase à venir)
+
+- **Dépôts concernés** : vetement-back (API, base de données, migrations) et vetement-front
+  (formulaire raccordé) ; ce fichier et les README des deux dépôts.
+- **Important, à ne pas présenter comme plus terminé que ça ne l'est** : tout le code de ce
+  ticket est écrit et vérifié par des tests réels contre une **vraie base PostgreSQL locale
+  (Docker, jetable, jamais Supabase)** — pas des simulations. Ce qui n'a **pas** encore été
+  fait : créer le projet Supabase réel, y appliquer les migrations, configurer les variables
+  secrètes sur Render, déployer, et exécuter la recette en ligne demandée par le ticket
+  (création d'un compte fictif depuis Vercel, vérification en base, refus d'un doublon). Cette
+  partie dépend d'actions que seul l'utilisateur peut effectuer (création de compte/projet
+  Supabase, accès au dashboard Render) — voir le prochain ticket ou la suite de cette
+  intervention pour son achèvement.
+- **Résultat réalisé et vérifié (localement, contre une vraie base Postgres)** :
+  - Schéma Prisma (`prisma/schema.prisma`), migration initiale versionnée
+    (`prisma/migrations/20260907224808_init/migration.sql`) créant le schéma `app` (pas
+    `public`), la table `app.users`, la contrainte unique sur `username_key`, puis révoquant
+    l'accès au schéma pour `PUBLIC` et (si présents — blocs conditionnels) `anon`/`authenticated`,
+    et créant le rôle applicatif `vetement_app` avec uniquement `USAGE` sur le schéma et
+    `SELECT`+`INSERT` sur `app.users`. Rejouée depuis zéro avec succès
+    (`prisma migrate deploy`) ; permissions effectives vérifiées avec `\dp app.users` (résultat
+    réel : `vetement_app=ar/postgres`, c'est-à-dire uniquement INSERT+SELECT).
+  - `POST /api/auth/register` : DTO volontairement permissif au niveau du pipe de validation
+    global (`@IsOptional()` seulement) pour que ce soit `RegisterService`, et non le pipe
+    Nest par défaut, qui produise le contrat de réponse exact du ticket — **un vrai bug trouvé
+    et corrigé pendant les tests** (un corps vide déclenchait initialement le format d'erreur
+    générique de Nest, pas `{status:'VALIDATION_ERROR', fieldErrors}`).
+  - Règles de nom d'utilisateur et de mot de passe implémentées exactement comme spécifié par
+    ce ticket (voir section D) — y compris le comptage en **points de code**, différent du
+    comptage en **grappes de graphèmes** du front (US-007), divergence documentée et signalée,
+    pas corrigée silencieusement.
+  - Liste locale de mots de passe courants (`common-passwords.ts`), ~50 entrées composées à la
+    main pour l'environnement de test, provenance documentée dans le fichier.
+  - Hachage Argon2id (`memoryCost=19456` Kio, `timeCost=2`, `parallelism=1`) — vérifié
+    réellement : deux comptes créés avec le même mot de passe ont des empreintes différentes
+    (sel aléatoire confirmé), et `argon2.verify()` confirme/rejette correctement.
+  - **Un vrai bug de comptage de la limitation de requêtes trouvé et corrigé** : une garde de
+    limitation posée à la fois globalement (`APP_GUARD`) et sur la route (`@UseGuards` +
+    `@Throttle`) comptait chaque requête deux fois (`X-RateLimit-Remaining` passait de 5 à 3
+    après une seule requête). Diagnostiqué en lisant les en-têtes de la réponse réelle, pas
+    supposé ; corrigé en retirant la garde globale.
+  - Limitation de requêtes vérifiée réellement : 6 requêtes rapides déclenchent un `429` avec
+    `{status:'RATE_LIMITED'}` et un en-tête `Retry-After` (valeur observée cohérente,
+    décroissante).
+  - **Concurrence réelle vérifiée** (pas supposée) : 5 requêtes identiques envoyées en parallèle
+    avec `curl ... &` puis `wait` → exactement 1 `201 ACCOUNT_CREATED`, le reste en `409`/`429` ;
+    confirmé directement en base (`SELECT count(*) ... = 1`). C'est la contrainte unique de la
+    base qui empêche le doublon, pas une vérification préalable (qui aurait laissé une fenêtre
+    de course).
+  - **Panne de base simulée réellement** (conteneur Postgres arrêté puis relancé pendant le
+    test) : `POST /api/auth/register` répond `503 SERVICE_UNAVAILABLE` proprement,
+    `GET /api/health` continue de répondre normalement pendant ce temps (PrismaService ne se
+    connecte pas au démarrage du module, seulement à la première requête réelle).
+  - Noms d'utilisateur arabes et accentués testés réellement de bout en bout (`محمد_2026`,
+    `Émilie-Dupont`), clés d'unicité vérifiées en base (`محمد_2026` inchangé — pas de casse en
+    arabe ; `émilie-dupont` en minuscules pour la version accentuée).
+  - Front : `RegistrationForm` envoie désormais un vrai appel à `POST /api/auth/register`
+    (`register-api.ts`, testé isolément), gère les 8 issues possibles (succès, erreur de champ,
+    nom pris, mot de passe courant, limite de requêtes, service indisponible, erreur
+    inattendue, résultat inconnu par timeout/échec réseau — jamais confondu avec une erreur
+    définitive), désactive le bouton et affiche « Création du compte… » pendant la requête,
+    affiche l'indication de démarrage à froid après 10s, abandonne après 90s sans nouvelle
+    tentative automatique. Bandeau d'information remplacé par le texte du ticket. Icônes
+    œil, traductions, responsive et validations locales de US-007/COR-008 conservés.
+  - CI (`.github/workflows/ci.yml`, vetement-back) : ajout d'un service Postgres jetable, des
+    étapes d'application des migrations et de fixation du mot de passe du rôle applicatif, puis
+    exécution réelle des tests end-to-end contre cette base — vérifié en relisant le résultat
+    des nouvelles étapes, pas seulement écrit.
+- **Tests ajoutés (tous exécutés avec succès)** :
+  - Unitaires (43 au total, back) : règles de nom d'utilisateur et mot de passe (dont comptage
+    par points de code sur un exemple arabe et un exemple latin décomposé), hachage Argon2id
+    réel (pas de mock), `RegisterService` avec Prisma/hachage simulés pour les branches
+    d'erreur (violation d'unicité, base injoignable, erreur inattendue).
+  - End-to-end (12 au total, back, contre la vraie base Postgres locale) : création réussie
+    avec vérification directe en base, refus d'un corps vide/d'une propriété inattendue/d'un
+    type incorrect, refus d'un mot de passe courant, refus d'un doublon exact et d'une variante
+    de casse, acceptation de noms arabes/accentués, **concurrence réelle (une seule création
+    sur 3 requêtes identiques simultanées)**, limitation de requêtes avec `Retry-After`.
+  - Front (53 au total) : dont un client d'API testé isolément (chaque code de statut
+    documenté, corps malformé, échec réseau, URL d'API absente) et le formulaire avec un vrai
+    mock de `fetch` (succès, nom pris, résultat inconnu en cas d'échec réseau, bouton désactivé
+    pendant la requête).
+  - `type-check`, `lint`, `build` : propres sur les deux dépôts.
+  - **Non vérifié par l'agent** (nécessite l'infrastructure réelle, pas encore créée) : recette
+    complète en ligne (étapes 1 à 8 du ticket, section 14) — création d'un compte fictif depuis
+    le site Vercel réel, vérification dans la vraie base Supabase, refus d'un doublon en
+    production, comportement réel du démarrage à froid de Render avec la base connectée.
+- **Commits (non poussés au moment de la rédaction de cette entrée)** : vetement-back
+  `ea8adc4` ; vetement-front `1b68ba6`.
+- **Travail restant** : toute la partie infrastructure réelle (section D, sous-section Base de
+  données) — création du projet Supabase, application des migrations, configuration des secrets
+  Render, déploiement, recette en ligne complète. Cette entrée sera complétée (ou une nouvelle
+  ajoutée) une fois cette partie terminée.
