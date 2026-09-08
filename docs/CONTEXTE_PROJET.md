@@ -154,8 +154,8 @@ Informations vérifiées le **2026-09-07**.
 | Front-end web | Next.js 16 + TypeScript, page d'accueil publique trilingue (US-004) + zone de diagnostic | **Déployé et vérifié en ligne** : https://vetement-front.vercel.app |
 | Front-end mobile (iOS/Android) | Applications mobiles | Reporté (hors périmètre MVP) |
 | Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Déployé et vérifié en ligne** : https://vetement-back.onrender.com/api/health |
-| Base de données | PostgreSQL (Supabase) — tables `app.users` (US-009), `app.sessions` (US-010) | **Vérifiée en local/CI** ; migration `sessions` écrite le 2026-09-08, pas encore appliquée sur le vrai projet Supabase (voir État réel, section E) |
-| Authentification | Création de compte (nom d'utilisateur + mot de passe), session automatique après inscription (US-010) | **Inscription + connexion automatique + espace protégé + déconnexion réels** (code vérifié en local/CI) — connexion d'un compte déjà existant reste le prochain ticket (voir questions ouvertes) |
+| Base de données | PostgreSQL (Supabase) — tables `app.users` (US-009), `app.sessions` (US-010) | **Déployée et vérifiée en ligne** — voir sous-section « Sessions et connexion automatique » ci-dessous |
+| Authentification | Création de compte (nom d'utilisateur + mot de passe), session automatique après inscription (US-010) | **Inscription + connexion automatique + espace protégé + déconnexion réels, vérifiés de bout en bout en ligne** — connexion d'un compte déjà existant reste le prochain ticket (voir questions ouvertes) |
 | Stockage des photos | Hébergement des photos d'annonces | Non créé |
 | Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Créé et vérifié** — voir sous-section « Hébergement » ci-dessous |
 
@@ -418,13 +418,41 @@ dans le JSON renvoyé au navigateur) → `/fr/espace` affiche le vrai nom d'util
 (`Origin: https://attacker.example`) et une requête sans jeton anti-CSRF sont toutes deux
 refusées (`403 FORBIDDEN`).
 
-**Non vérifié par l'agent** (nécessite un navigateur réel ou l'infrastructure réelle, hors de
-portée des outils disponibles) : comportement réel sur Safari mobile (c'est la raison même du
-relais, mais son nécessaire ne peut être observé sans un vrai appareil) ; rendu visuel de l'avatar,
-de l'espace connecté et des messages dans les 3 langues ; comportement multi-onglets dans un vrai
-navigateur (les tests automatisés simulent les évènements `BroadcastChannel`/`storage`, pas un
-second onglet réel) ; migration `sessions` appliquée sur le vrai projet Supabase et recette en
-ligne complète (Vercel + Render) — voir État réel, section E, et Reprise, section I.
+**Vérifié réellement en ligne (Vercel + Render + Supabase, le 2026-09-08)**, exactement le même
+parcours que ci-dessus rejoué sur les URL réelles : inscription réelle via le relais
+(`https://vetement-front.vercel.app/api/auth/register`) → cookie `vetement_session` posé, cette
+fois avec `Secure` en plus de `HttpOnly` (absent en local en HTTP, présent en ligne en HTTPS,
+comme attendu) → `/fr/espace` affiche le vrai nom → `GET /api/auth/me` répond `200` → déconnexion
+→ cookie effacé → `GET /api/auth/me` répond `401` → `/fr/espace` redirige de nouveau.
+
+**Incident réel rencontré et corrigé pendant la mise en ligne — à garder en tête pour toute
+future migration appliquée manuellement** : la migration `sessions` n'a pas été appliquée par le
+Pre-Deploy Command de Render au premier déploiement (cause exacte non identifiée — les logs
+"Logs" de Render n'affichent pas la sortie de cette étape, seulement les logs d'exécution de
+l'application). Contournement : SQL appliqué manuellement par l'utilisateur via l'éditeur SQL du
+dashboard Supabase (création de la table + `GRANT` + une ligne insérée dans `_prisma_migrations`
+pour que Prisma la considère appliquée et ne tente pas de la rejouer au prochain déploiement).
+**Effet de bord découvert à cette occasion** : une table créée via l'éditeur SQL Supabase se
+retrouve avec la sécurité au niveau ligne (RLS) activée automatiquement, sans aucune règle
+définie — ce qui bloque silencieusement tout accès, y compris pour un rôle disposant déjà des
+`GRANT` nécessaires (erreur Postgres `42501`, "new row violates row-level security policy").
+`app.users` n'a jamais eu ce problème (sa migration, elle, avait été appliquée via
+`prisma migrate deploy`/Render, pas via l'éditeur SQL). Corrigé par
+`ALTER TABLE "app"."sessions" DISABLE ROW LEVEL SECURITY;` — cohérent avec le modèle de sécurité
+du projet (isolation par schéma `app` + `REVOKE`/`GRANT` explicites, aucune politique RLS
+utilisée nulle part). **À retenir** : si une prochaine migration doit un jour être appliquée
+manuellement via l'éditeur SQL Supabase (plutôt que par le pipeline `prisma migrate deploy`
+habituel), vérifier après coup si RLS a été activé sur la ou les nouvelles tables.
+- Deux comptes de test réels créés pendant cette vérification (`e2e-direct-nest-test3`,
+  `e2e-us010-relay-ok`) — fictifs, sans donnée sensible autre qu'une empreinte de mot de passe de
+  test, laissés en base sans urgence (même situation qu'en fin de US-009 : le rôle applicatif ne
+  peut pas les supprimer, `DIRECT_URL` requis).
+
+**Non vérifié par l'agent** (nécessite un navigateur réel, hors de portée des outils disponibles) :
+comportement réel sur Safari mobile (c'est la raison même du relais, mais son nécessaire ne peut
+être observé sans un vrai appareil) ; rendu visuel de l'avatar, de l'espace connecté et des
+messages dans les 3 langues ; comportement multi-onglets dans un vrai navigateur (les tests
+automatisés simulent les évènements `BroadcastChannel`/`storage`, pas un second onglet réel).
 
 ### Versions réellement installées (vérifié le 2026-09-07)
 
@@ -508,13 +536,13 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
   complet en journal ci-dessous.
 - **US-010** — Connexion automatique après inscription, espace protégé (`/<langue>/espace`),
   sessions serveur opaques (`app.sessions`), relais Next.js same-origin, CSRF (origine stricte +
-  double dépôt), déconnexion multi-onglets. **Important, à ne pas présenter comme plus terminé que
-  ça ne l'est** : tout le code est écrit, testé (58 tests back dont 25 e2e contre une vraie base
-  Postgres locale ; 95 tests front) et vérifié manuellement de bout en bout contre des serveurs de
-  développement locaux réels (voir sous-section « Sessions et connexion automatique », section D).
-  Ce qui n'a **pas** encore été fait : appliquer la migration `sessions` sur le vrai projet
-  Supabase, ajouter `INTERNAL_API_URL` sur Vercel, déployer, et rejouer la recette sur
-  l'infrastructure réelle — voir Reprise, section I, pour la suite exacte.
+  double dépôt), déconnexion multi-onglets. Déployé et vérifié de bout en bout le 2026-09-08 : code
+  testé (58 tests back dont 25 e2e contre une vraie base Postgres locale ; 95 tests front),
+  migration `sessions` appliquée sur le vrai projet Supabase (avec un incident RLS rencontré et
+  corrigé au passage — voir sous-section « Sessions et connexion automatique », section D pour le
+  détail complet), `INTERNAL_API_URL` configurée sur Vercel, et recette rejouée avec succès sur
+  l'infrastructure réelle (inscription → session → espace connecté → déconnexion → session
+  révoquée, CSRF vérifié activement).
 
 **Prévu (pas commencé) :**
 - Connexion d'un utilisateur déjà inscrit (US-010 a créé la session ; se connecter à un compte
@@ -1293,43 +1321,52 @@ explicite de l'utilisateur.
   bloc `<!-- BEGIN:nextjs-agent-rules -->` dans `CLAUDE.md` (fonctionnalité native de Next.js 16,
   sans rapport avec ce ticket) — retiré avant de considérer le dépôt propre, pour ne garder que
   les changements réels de US-010.
-- **Travail restant (infrastructure réelle, pas le code)** : appliquer la migration `sessions` sur
-  le vrai projet Supabase (automatique via le Pre-Deploy Command déjà configuré sur Render, dès le
-  prochain déploiement — aucune action manuelle requise pour la migration elle-même) ; ajouter
-  `INTERNAL_API_URL` dans les variables d'environnement Vercel ; pousser les deux dépôts ; rejouer
-  la recette sur les URL réelles (`vetement-front.vercel.app`, `vetement-back.onrender.com`). Voir
-  section I pour la suite exacte — **rien de tout cela n'a été fait sans confirmation explicite de
-  l'utilisateur** (ni commit, ni push, ni déploiement à ce stade).
-- **Commits** : aucun — en attente de confirmation de l'utilisateur avant de committer/pousser
-  (voir section I).
+- **Suite donnée le même jour (2026-09-08), avec confirmation explicite de l'utilisateur à chaque
+  étape** : les deux dépôts committés et poussés ; Render et Vercel ont redéployé automatiquement.
+  Le Pre-Deploy Command de Render **n'a pas appliqué** la migration `sessions` (cause exacte non
+  identifiée — voir le détail dans la sous-section « Sessions et connexion automatique », section
+  D) ; contournement réalisé par l'utilisateur via l'éditeur SQL Supabase (SQL fourni exactement,
+  avec la ligne `_prisma_migrations` correspondante). Effet de bord rencontré et corrigé au passage
+  : RLS activé automatiquement sur la table créée via l'éditeur SQL, sans règle définie — désactivé
+  explicitement (`ALTER TABLE ... DISABLE ROW LEVEL SECURITY`), cohérent avec le modèle de sécurité
+  du projet. `INTERNAL_API_URL` ajoutée sur Vercel, puis un redéploiement manuel a été nécessaire
+  (une variable d'environnement ajoutée après coup ne s'applique pas à un déploiement déjà
+  construit — piège Vercel classique). Recette complète rejouée avec succès sur les URL réelles
+  (inscription → session → espace connecté → déconnexion → session révoquée, CSRF vérifié
+  activement) — voir le détail complet en section D.
+- **Commits** : `8b7bbba` (vetement-back), `34c3da3` (vetement-front) — poussés sur `main` des deux
+  dépôts respectifs.
 
 ## I. Reprise à la prochaine session
 
 Rédigé le 2026-09-08, à la clôture volontaire de la session de travail (le projet sera repris
 plus tard, éventuellement par un autre intervenant humain ou IA). **Vérifié en direct au moment
-de la rédaction** (pas supposé) : les deux dépôts sont propres (`git status` sans changement,
-aucun commit local non poussé), les deux CI GitHub Actions les plus récentes sont vertes, le
-front répond en HTTPS, `GET /api/health` répond avec le dernier commit, et une inscription
-réelle suivie d'un refus de doublon fonctionnent en ligne à l'instant de la rédaction.
+de la rédaction** (pas supposé) : les deux dépôts sont propres (`git status` sans changement non
+committé, hormis la mise à jour finale de ce fichier), les deux CI GitHub Actions les plus
+récentes sont vertes, le back répond en HTTPS avec le dernier commit, le front répond en HTTPS, et
+le parcours complet (inscription → session → espace connecté → déconnexion) fonctionne en ligne à
+l'instant de la rédaction — voir le détail en section H.
 
 ### Où nous nous sommes arrêtés
 
-**Aucun ticket n'est en cours.** Le dernier ticket traité (US-009 — créer réellement les
-comptes) est **terminé et vérifié de bout en bout**, infrastructure réelle comprise : base
-Supabase créée, migrée, connectée ; inscription réelle fonctionnelle en ligne, avec refus de
-doublon et dégradation propre si la base est indisponible. La rotation de sécurité qui a suivi
-(voir journal, section H) est elle aussi terminée et vérifiée. Le projet est dans un état stable
-et entièrement poussé — une prochaine session peut commencer un nouveau ticket sans reprise de
-travail interrompu.
+**Aucun ticket n'est en cours.** Le dernier ticket traité (US-010 — connexion automatique après
+inscription, espace connecté, sessions serveur) est **terminé et vérifié de bout en bout**,
+infrastructure réelle comprise : table `app.sessions` créée sur le vrai projet Supabase, relais
+Next.js déployé sur Vercel avec `INTERNAL_API_URL` configurée, recette complète rejouée avec
+succès sur les URL réelles. Deux incidents réels rencontrés et corrigés pendant cette mise en
+ligne (matcher `proxy.ts` capturant `/api/*` à tort, RLS activé automatiquement sur `app.sessions`
+par l'éditeur SQL Supabase) — voir section H pour le détail complet, utile à connaître avant toute
+future migration appliquée manuellement. Le projet est dans un état stable et entièrement poussé —
+une prochaine session peut commencer un nouveau ticket sans reprise de travail interrompu.
 
 ### Dernier travail réalisé et son résultat
 
-1. US-009 (fonctionnalité) : inscription réelle (`POST /api/auth/register`) écrite, testée
-   contre une vraie base Postgres locale, puis déployée et re-vérifiée contre le vrai projet
-   Supabase — résultat : succès complet, recette en ligne du ticket exécutée intégralement.
-2. Rotation du mot de passe principal Supabase (incident mineur de sécurité, un mot de passe
-   passé une fois dans la conversation) — résultat : réinitialisé par l'utilisateur, re-vérifié
-   fonctionnel.
+1. US-010 (fonctionnalité) : session serveur opaque, relais Next.js same-origin, page `/espace`
+   protégée, CSRF à deux couches, déconnexion multi-onglets — écrit, testé (153 tests au total
+   entre les deux dépôts), déployé et re-vérifié contre l'infrastructure réelle (Vercel + Render +
+   Supabase) — résultat : succès complet, recette en ligne exécutée intégralement.
+2. Diagnostic et correction de deux incidents réels de mise en ligne (voir section H) : matcher
+   `proxy.ts` trop large, RLS activé à tort sur une table créée via l'éditeur SQL Supabase.
 
 ### Branches et commits utiles
 
@@ -1338,8 +1375,8 @@ aucun des deux dépôts au moment de la rédaction.
 
 | Dépôt | Dernier commit | Résumé |
 |---|---|---|
-| vetement-back | `9d541af` | docs: close out the session — reconcile stale status, add resume section (dernier commit fonctionnel avant celui-ci : `6e5a1c5`, rotation du mot de passe Supabase documentée) |
-| vetement-front | `1b68ba6` | feat(US-009): connect the registration form to the real API |
+| vetement-back | `8b7bbba` (suivi d'une mise à jour de ce fichier, voir `git log -1`) | feat(US-010): create a real server-side session on registration |
+| vetement-front | `34c3da3` | feat(US-010): protected space, auto-login after registration |
 
 **À la reprise, ne pas se fier uniquement à ce tableau** : exécuter `git log -1 --oneline` dans
 chaque dépôt pour confirmer le commit réellement présent, et comparer avec le commit affiché en
@@ -1348,43 +1385,57 @@ s'assurer que le déploiement correspond bien au dernier commit poussé.
 
 ### Changements encore locaux ou non poussés
 
-**Aucun**, vérifié au moment de la rédaction (`git status` propre sur les deux dépôts, branche
-`main` alignée avec `origin/main`). Le seul fichier local non versionné est
-`vetement-back/.env` (secrets de développement local, correctement ignoré par Git) — son
-contenu pointe vers un conteneur Docker PostgreSQL local qui a été arrêté et supprimé à la fin
-de cette session ; il faudra en recréer un (ou ajuster `.env`) pour retester en local avec une
-vraie base avant la prochaine intervention nécessitant `npm run test:e2e` en local.
+**Aucun** une fois ce fichier committé (dernière action de cette session). Le seul fichier local
+non versionné est `vetement-back/.env` (secrets de développement local, correctement ignoré par
+Git) — son contenu pointe vers un conteneur Docker PostgreSQL local (`vetement-postgres`, port
+55432) **laissé en cours d'exécution** à la fin de cette session (contrairement aux sessions
+précédentes) ; à arrêter/supprimer si non réutilisé prochainement (`docker rm -f
+vetement-postgres`), ou à réutiliser tel quel pour la prochaine intervention nécessitant
+`npm run test:e2e` en local. `vetement-front/.env.local` a aussi été créé localement (non
+versionné, pointe vers ce même back local) — sans risque, mais à recréer sur une autre machine.
 
 ### Problèmes connus (non bloquants, à garder en tête)
 
 - **Divergence de comptage Unicode front/back** (grappes de graphèmes côté front US-007, points
   de code côté back US-009) — documentée en section D et G, jamais arbitrée. Risque limité à des
   noms d'utilisateur contenant des marques diacritiques combinantes.
-- **Deux comptes de test résiduels** dans la vraie base Supabase (`Cloture-Session-Check`,
-  potentiellement `Verif-Post-Rotation`) — fictifs, sans donnée sensible, suppressibles
+- **Quatre comptes de test résiduels** dans la vraie base Supabase (`Cloture-Session-Check`,
+  potentiellement `Verif-Post-Rotation` depuis US-009 ; `e2e-direct-nest-test3` et
+  `e2e-us010-relay-ok` depuis la recette US-010) — fictifs, sans donnée sensible, suppressibles
   uniquement via un accès privilégié (`DIRECT_URL`) que l'agent n'a plus (voir ci-dessous).
-- **L'agent n'a plus accès à `DIRECT_URL`** (mot de passe Supabase tourné par l'utilisateur,
-  volontairement non retransmis). Toute opération nécessitant le rôle privilégié (nouvelle
-  migration, nettoyage direct en base) demandera de refournir cet accès, avec la même prudence
-  que la première fois (ne jamais coller de secret dans la conversation ; utiliser le fichier
-  `.env` local ou une autorisation explicite au cas par cas).
+- **L'agent n'a plus accès à `DIRECT_URL`** (mot de passe Supabase tourné par l'utilisateur lors
+  d'une session précédente, volontairement non retransmis). Toute opération nécessitant le rôle
+  privilégié (nouvelle migration appliquée directement par l'agent, nettoyage direct en base)
+  demandera de refournir cet accès, avec la même prudence que la première fois (ne jamais coller
+  de secret dans la conversation ; utiliser le fichier `.env` local ou une autorisation explicite
+  au cas par cas) — **ou** de reproduire le contournement de cette session (SQL fourni à
+  l'utilisateur, exécuté par lui via l'éditeur Supabase, avec la ligne `_prisma_migrations`
+  correspondante — voir section H pour l'exemple concret).
+- **Le Pre-Deploy Command de Render n'a, cette fois, pas appliqué la migration `sessions`
+  automatiquement** — cause exacte non identifiée (les logs "Logs" de Render n'exposent pas la
+  sortie de cette étape spécifique). Ce point mériterait d'être élucidé avant la prochaine
+  migration : soit en retrouvant le bon onglet/vue Render qui affiche cette étape, soit en
+  surveillant activement le prochain déploiement qui en contient une.
 - **Limitation de requêtes en mémoire, une seule instance** : redémarre à zéro à chaque
   redéploiement Render ; non partagé si l'offre venait à inclure plusieurs instances (pas le cas
   actuellement).
 - **Mise en veille Render (plan gratuit)** : ~30–60 s de démarrage à froid après une période
   d'inactivité — géré côté front (indication après 10 s, abandon après 90 s) mais reste une
-  gêne perçue par un visiteur réel.
+  gêne perçue par un visiteur réel ; le nouveau `SessionWatcher` (US-010) est conçu pour ne
+  jamais confondre ce délai avec une déconnexion, mais ce comportement précis n'a pas pu être
+  observé sur un vrai cold-start pendant cette session.
 - **Aucune vérification visuelle par un vrai navigateur n'a jamais été faite par l'agent**, sur
   aucun ticket, faute d'outil disponible dans cet environnement (captures d'écran, rendu
-  multi-largeurs, confort tactile réel, comportement du clavier virtuel mobile) — signalé
-  systématiquement dans chaque entrée de journal concernée plutôt que supposé correct. À vérifier
-  par un humain sur un vrai appareil avant de considérer l'interface pleinement validée.
+  multi-largeurs, confort tactile réel, comportement du clavier virtuel mobile, Safari mobile en
+  particulier — pourtant la raison d'être du relais US-010) — signalé systématiquement dans
+  chaque entrée de journal concernée plutôt que supposé correct. À vérifier par un humain sur un
+  vrai appareil avant de considérer l'interface pleinement validée.
 
 ### Règles visuelles à respecter dans toute future intervention front
 
 - **Thème clair forcé**, y compris si le système est en mode sombre (décision COR-005) — ne pas
-  réintroduire de bloc `@media (prefers-color-scheme: dark)` sur l'accueil/l'inscription sans
-  validation explicite de l'utilisateur.
+  réintroduire de bloc `@media (prefers-color-scheme: dark)` sur l'accueil/l'inscription/l'espace
+  sans validation explicite de l'utilisateur.
 - **Contrastes** : viser au moins 4,5:1 pour tout texte, y compris les petits libellés/badges ;
   ne jamais signaler un état (erreur, désactivé) uniquement par la couleur.
 - **Aucun motif de fond répété** (étoiles ou autre symbole décoratif répété) — règle explicite de
@@ -1395,33 +1446,40 @@ vraie base avant la prochaine intervention nécessitant `npm run test:e2e` en lo
 - **Icônes œil intégrées** dans les champs de mot de passe (position absolue, zone tactile
   44×44px, `aria-label` traduit, jamais de texte visible ni d'emoji) — motif à reproduire pour
   tout futur champ de mot de passe (page de connexion, etc.).
+- **Icônes/avatars en SVG dessiné pour le projet** (US-010, `Avatar.tsx`) — même logique que les
+  icônes œil, aucune bibliothèque d'icônes à ajouter pour de futurs pictogrammes simples.
 
 ### Prochaines étapes proposées (aucune commencée)
 
 Par ordre plausible, sans engagement — à confirmer par l'utilisateur avant de commencer l'une
 d'entre elles :
-1. Décider du mécanisme de connexion/session (JWT ? cookie de session ?), puis créer la page et
-   l'API de connexion (le bouton Connexion de l'accueil est prêt, juste désactivé).
+1. Connexion d'un utilisateur déjà inscrit — le mécanisme de session existe désormais (US-010) et
+   est directement réutilisable ; reste à écrire la page/API de connexion elle-même (le bouton
+   Connexion de l'accueil est prêt, juste désactivé).
 2. Décider d'une méthode de récupération de compte sans e-mail ni téléphone (question ouverte
-   posée par deux tickets consécutifs, jamais tranchée).
+   posée par deux tickets consécutifs, mise de côté explicitement par l'utilisateur cette
+   session — à reprendre après la connexion).
 3. Décider si un point d'accès de vérification de disponibilité du nom d'utilisateur est
    nécessaire (compromis avec le risque d'énumération des comptes, volontairement évité jusqu'ici).
 4. Arbitrer la divergence de comptage Unicode front/back.
-5. Premier développement fonctionnel produit (annonces) une fois l'authentification complète.
+5. Élucider pourquoi le Pre-Deploy Command Render n'a pas appliqué la migration `sessions` (voir
+   « Problèmes connus » ci-dessus), avant qu'une prochaine migration ne rencontre le même sort.
+6. Premier développement fonctionnel produit (annonces) une fois l'authentification complète.
 
 ### Décisions à demander à l'utilisateur avant de poursuivre
 
 - Toutes les questions listées en section G ("Questions ouvertes") restent sans réponse —
   les relire avant de proposer un prochain ticket.
-- Nettoyer ou laisser les comptes de test résiduels dans Supabase (voir ci-dessus) ?
-- Choix du mécanisme de connexion/session (question technique structurante pour tout le reste).
+- Nettoyer ou laisser les quatre comptes de test résiduels dans Supabase (voir ci-dessus) ?
+- Arrêter/supprimer le conteneur Docker local `vetement-postgres` ou le laisser tourner ?
 - Le nom de marque « Vetement » reste-t-il provisoire indéfiniment, ou une marque définitive
   doit-elle être fixée avant de poursuivre le développement produit ?
+- Faut-il investiguer la clé de durcissement différée `INTERNAL_API_KEY` (section G) avant ou
+  après le prochain ticket fonctionnel ?
 
 ### Rappel
 
 Ce fichier documente des accès (GitHub, Vercel, Render, Supabase) qui étaient valides à la date
 de rédaction ci-dessus. **Aucune garantie qu'ils le soient encore à la prochaine session** — un
-jeton peut expirer, un mot de passe peut avoir été changé entre-temps (comme celui de Supabase
-pendant cette session même). Revérifier systématiquement avant de supposer un accès acquis
-(section C, procédure de vérification).
+jeton peut expirer, un mot de passe peut avoir été changé entre-temps. Revérifier systématiquement
+avant de supposer un accès acquis (section C, procédure de vérification).
