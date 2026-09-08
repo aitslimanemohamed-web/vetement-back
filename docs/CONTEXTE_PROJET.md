@@ -445,8 +445,8 @@ manuellement via l'éditeur SQL Supabase (plutôt que par le pipeline `prisma mi
 habituel), vérifier après coup si RLS a été activé sur la ou les nouvelles tables.
 - Deux comptes de test réels créés pendant cette vérification (`e2e-direct-nest-test3`,
   `e2e-us010-relay-ok`) — fictifs, sans donnée sensible autre qu'une empreinte de mot de passe de
-  test, laissés en base sans urgence (même situation qu'en fin de US-009 : le rôle applicatif ne
-  peut pas les supprimer, `DIRECT_URL` requis).
+  test. **Nettoyés le 2026-09-08**, avec les deux comptes résiduels de US-009 — voir le journal
+  du même jour ci-dessous.
 
 **Non vérifié par l'agent** (nécessite un navigateur réel, hors de portée des outils disponibles) :
 comportement réel sur Safari mobile (c'est la raison même du relais, mais son nécessaire ne peut
@@ -1265,9 +1265,8 @@ explicite de l'utilisateur.
   dernière vérification) et potentiellement `Verif-Post-Rotation` (créé juste après la
   rotation). Ni l'un ni l'autre ne peut être supprimé par le rôle applicatif `vetement_app`
   (pas de droit `DELETE`, par conception) ; leur suppression demande un accès `DIRECT_URL`, que
-  l'agent n'a plus. À nettoyer par l'utilisateur si souhaité (éditeur SQL Supabase :
-  `DELETE FROM app.users WHERE username IN ('Cloture-Session-Check', 'Verif-Post-Rotation');`),
-  sans urgence.
+  l'agent n'a plus. **Nettoyés le 2026-09-08** (avec les comptes de test de US-010, voir journal
+  correspondant) — non résiduels.
 - **Travail restant** : aucun pour US-009. Voir la section « Reprise à la prochaine session »
   ci-dessous pour la suite du projet.
 
@@ -1337,6 +1336,20 @@ explicite de l'utilisateur.
 - **Commits** : `8b7bbba` (vetement-back), `34c3da3` (vetement-front) — poussés sur `main` des deux
   dépôts respectifs.
 
+### 2026-09-08 — Nettoyage des comptes de test résiduels (US-009 + US-010)
+
+- **Dépôt concerné** : aucun changement de code ; opération directement en base Supabase.
+- **Résultat** : les quatre comptes de test fictifs restés en base depuis US-009
+  (`Cloture-Session-Check`, `Verif-Post-Rotation`) et la recette en ligne de US-010
+  (`e2e-direct-nest-test3`, `e2e-us010-relay-ok`) ont été supprimés par l'utilisateur via
+  l'éditeur SQL Supabase (`DELETE FROM app.users WHERE username IN (...)`, SQL fourni exactement
+  par l'agent). Suppression en cascade des sessions associées via `ON DELETE CASCADE`
+  (`app.sessions.user_id`), pas d'action séparée nécessaire sur cette table.
+- **Vérification effectuée (par l'utilisateur, requête réelle, pas supposée)** : `SELECT` avant
+  suppression confirmant les 4 lignes présentes (avec `created_at`), puis `SELECT` après
+  suppression ne renvoyant plus aucune ligne pour ces 4 noms.
+- **Travail restant** : aucun.
+
 ## I. Reprise à la prochaine session
 
 Rédigé le 2026-09-08, à la clôture volontaire de la session de travail (le projet sera repris
@@ -1399,10 +1412,6 @@ versionné, pointe vers ce même back local) — sans risque, mais à recréer s
 - **Divergence de comptage Unicode front/back** (grappes de graphèmes côté front US-007, points
   de code côté back US-009) — documentée en section D et G, jamais arbitrée. Risque limité à des
   noms d'utilisateur contenant des marques diacritiques combinantes.
-- **Quatre comptes de test résiduels** dans la vraie base Supabase (`Cloture-Session-Check`,
-  potentiellement `Verif-Post-Rotation` depuis US-009 ; `e2e-direct-nest-test3` et
-  `e2e-us010-relay-ok` depuis la recette US-010) — fictifs, sans donnée sensible, suppressibles
-  uniquement via un accès privilégié (`DIRECT_URL`) que l'agent n'a plus (voir ci-dessous).
 - **L'agent n'a plus accès à `DIRECT_URL`** (mot de passe Supabase tourné par l'utilisateur lors
   d'une session précédente, volontairement non retransmis). Toute opération nécessitant le rôle
   privilégié (nouvelle migration appliquée directement par l'agent, nettoyage direct en base)
@@ -1470,7 +1479,6 @@ d'entre elles :
 
 - Toutes les questions listées en section G ("Questions ouvertes") restent sans réponse —
   les relire avant de proposer un prochain ticket.
-- Nettoyer ou laisser les quatre comptes de test résiduels dans Supabase (voir ci-dessus) ?
 - Arrêter/supprimer le conteneur Docker local `vetement-postgres` ou le laisser tourner ?
 - Le nom de marque « Vetement » reste-t-il provisoire indéfiniment, ou une marque définitive
   doit-elle être fixée avant de poursuivre le développement produit ?
