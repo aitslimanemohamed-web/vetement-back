@@ -1380,8 +1380,10 @@ explicite de l'utilisateur.
   en production, ce qui est ce qui compte réellement. Recette complète rejouée en ligne après ce
   correctif (inscription → « Mon espace » visible dans l'en-tête → déconnexion → `/espace`
   de nouveau protégé) : succès.
-- **Compte de test réel créé pendant cette vérification** (`e2e-fixes-final`) — fictif, laissé en
-  base sans urgence (même limite que d'habitude : suppression réservée au rôle privilégié).
+- **Compte de test réel créé pendant cette vérification** (`e2e-fixes-final`) — fictif, **nettoyé
+  le 2026-09-08 par l'utilisateur** via l'éditeur SQL Supabase (même procédure que précédemment,
+  `SELECT` avant/après confirmant la suppression). Base de test sans compte résiduel connu à la
+  fin de cette session.
 - **Limites persistantes, non corrigibles dans cet environnement** : comportement réel sur Safari
   mobile, rendu visuel réel (captures d'écran, responsive, RTL, noms arabes longs) — toujours hors
   de portée des outils disponibles ici, signalé plutôt que supposé correct.
