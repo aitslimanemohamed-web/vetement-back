@@ -151,11 +151,12 @@ Informations vérifiées le **2026-09-07**.
 
 | Composant | Rôle prévu | État |
 |---|---|---|
-| Front-end web | Next.js 16 + TypeScript, page d'accueil publique trilingue (US-004) + zone de diagnostic | **Déployé et vérifié en ligne** : https://vetement-front.vercel.app |
+| Front-end web | Next.js 16 + TypeScript, page d'accueil publique trilingue (US-004) + zone de diagnostic + page « Découvrir » de l'espace connecté (US-012) | **Déployé et vérifié en ligne** : https://vetement-front.vercel.app |
 | Front-end mobile (iOS/Android) | Applications mobiles | Reporté (hors périmètre MVP) |
 | Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Déployé et vérifié en ligne** : https://vetement-back.onrender.com/api/health |
 | Base de données | PostgreSQL (Supabase) — tables `app.users` (US-009), `app.sessions` (US-010) | **Déployée et vérifiée en ligne** — voir sous-section « Sessions et connexion automatique » ci-dessous |
 | Authentification | Création de compte, session automatique après inscription (US-010), connexion d'un compte existant (US-011) | **Inscription, connexion, espace protégé et déconnexion réels, vérifiés de bout en bout en ligne** — récupération de compte et évolution de l'authentification avant production restent hors périmètre (voir questions ouvertes) |
+| Annonces (recherche, catégories, vente) | Interface de découverte des annonces (US-012) | **Interface visuelle créée et déployée** — recherche, localisation, filtres, catégories, tri et vente **volontairement désactivés** (aucune API métier, aucune annonce réelle) ; voir sous-section « Page Découvrir » ci-dessous |
 | Stockage des photos | Hébergement des photos d'annonces | Non créé |
 | Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Créé et vérifié** — voir sous-section « Hébergement » ci-dessous |
 
@@ -511,6 +512,67 @@ exactement `401 {status:'INVALID_CREDENTIALS'}`. Limitation de requêtes vérifi
 comportement réel sur Safari mobile, rendu visuel/responsive/RTL réel de la page `/connexion`
 dans les 3 langues, confort tactile du champ mot de passe sur téléphone.
 
+### Page « Découvrir » (US-012)
+
+**Ce que le ticket change** : le contenu minimal de `/<langue>/espace` (« Bienvenue, {nom} »,
+une phrase d'attente) est remplacé par une interface complète de type marketplace — recherche,
+localisation, catégories, zone d'annonces, navigation — **entièrement visuelle pour ce ticket** :
+aucune nouvelle route API, aucune modification de la base de données. La route reste protégée
+exactement comme avant (US-010) ; seul le contenu affiché change.
+
+**Organisation du code** (`src/features/discover/`, tous des Server Components — aucune des
+nouvelles commandes n'étant interactive, aucun composant client n'est nécessaire) :
+- `DiscoverHeader.tsx` — logo (lien accueil actif), sélecteur de langue, avatar + nom réel,
+  déconnexion (tous actifs, réutilisés tels quels — `LanguageSwitcher`, `Avatar`, `LogoutButton`) ;
+  sur ordinateur uniquement, trois actions désactivées supplémentaires (Favoris, Messages, Vendre
+  — mis en avant par une teinte verte, jamais par une opacité réduite). L'avatar + le nom
+  représentent visuellement « Profil » : contrairement au Header marketing (US-010/US-011), ce
+  n'est plus un lien — pas de page de profil pour l'instant, et on est déjà sur `/espace`.
+- `SearchLocationBar.tsx` — recherche, localisation, filtres : trois **boutons désactivés**, pas
+  un `<input>` pour la recherche (un vrai champ ouvrirait le clavier virtuel sur téléphone, ce que
+  le ticket exclut explicitement).
+- `CategoryShortcuts.tsx` — Tout/Femme/Homme/Enfant, boutons désactivés, « Tout » marqué
+  sélectionné par le style seul (aucun état réel). **Proposition de navigation pour cette première
+  interface, pas des catégories créées en base ni des règles de classement des annonces.**
+- `ListingsSection.tsx` — titre « À découvrir », bouton « Trier » désactivé, état vide (même
+  illustration que `ListingsPlaceholder` de l'accueil publique — `listings-hanger.svg`, aucun
+  nouvel asset), bouton « Vendre un vêtement » désactivé. Un conteneur de grille réutilisable est
+  préparé en CSS (`.grid`, 2 colonnes téléphone / 3-4 ordinateur) pour un prochain ticket, mais
+  non instancié dans le HTML tant qu'il n'y a pas de vraies annonces — pas de cases vides ni de
+  chargement permanent affichés.
+- `BottomNav.tsx` — téléphone uniquement (masquée ≥700px par CSS, mêmes destinations déjà dans
+  `DiscoverHeader` sur ordinateur) : Découvrir (page courante, `aria-current="page"`, pas un
+  bouton désactivé — juste un repère visuel, aucune navigation nécessaire), Favoris, Vendre (mis
+  en avant), Messages, Profil (ces quatre-là de vrais boutons désactivés).
+- `icons.tsx` — jeu d'icônes SVG dessinées pour ce projet (loupe, localisation, filtres, cœur,
+  plus, bulle de message, boussole, tri, personne), même convention que les icônes œil (COR-008) —
+  aucune bibliothèque d'icônes ajoutée.
+
+**Règle commune appliquée partout** (US-012, section 8) : chaque commande non encore fonctionnelle
+est un vrai `<button disabled>` (jamais un lien `href="#"`), stylée par une bordure/couleur
+neutre plutôt qu'une opacité réduite (cohérent avec `DisabledActionButton`/COR-005, mais sans
+répéter une légende "Bientôt disponible" sous chaque élément — une seule indication discrète,
+partagée pour toute la page, est affichée une fois sous la zone d'annonces).
+
+**Zone de sécurité tactile (téléphone)** : `viewport.viewportFit = 'cover'` ajouté dans
+`[locale]/layout.tsx` (nécessaire pour que `env(safe-area-inset-bottom)` résolve à une vraie
+valeur sur les téléphones à encoche) ; `BottomNav` l'utilise en `padding-bottom`, et le contenu
+principal de la page réserve l'espace correspondant (`page.module.css`) pour que cette barre fixe
+ne masque jamais le bas du contenu (bouton « Vendre un vêtement », indication discrète).
+
+**Vérifié réellement en local** : inscription → page Découvrir affichée avec le vrai nom
+d'utilisateur, les 16 commandes désactivées attendues toutes présentes et réellement `disabled`
+(compté explicitement : 3 dans l'en-tête + 3 recherche/localisation/filtres + 4 catégories + 2
+tri/vendre + 4 navigation basse), RTL et traductions correctes dans les 3 langues (vérifié y
+compris `dir="rtl"` réel sur `/ar/espace`), déconnexion et protection de la route toujours
+fonctionnelles après ce changement.
+
+**Non vérifié par l'agent** (nécessite un navigateur réel, hors de portée des outils disponibles) :
+rendu visuel réel aux largeurs 320/390/768/1440px, absence de débordement horizontal réelle,
+confort tactile des zones cliquables, comportement réel de la zone de sécurité sur un téléphone à
+encoche, apparence de la navigation basse fixe par-dessus le clavier virtuel ou d'autres UI
+système, Safari mobile en particulier.
+
 ### Versions réellement installées (vérifié le 2026-09-07)
 
 | Outil / paquet | Version |
@@ -608,8 +670,17 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
   nom), protection anti-énumération vérifiée (nom inconnu et mot de passe incorrect indiscernables,
   y compris par le temps de réponse) — voir sous-section « Connexion d'un compte existant »,
   section D, pour le détail complet.
+- **US-012** — Page « Découvrir » de l'espace connecté (recherche, localisation, catégories,
+  zone d'annonces, navigation basse mobile) — **entièrement visuelle, aucune API métier ni
+  modification de base**. Toutes les nouvelles commandes sont de vrais boutons désactivés (jamais
+  de liens `href="#"`), aucune annonce fictive. Déployé et vérifié le 2026-09-08 (16 commandes
+  désactivées comptées et confirmées, 3 langues, RTL réel) — voir sous-section « Page Découvrir »,
+  section D, pour le détail complet.
 
 **Prévu (pas commencé) :**
+- Rendre fonctionnelles les commandes de la page Découvrir (recherche, localisation, filtres,
+  catégories réelles, tri, favoris, messagerie, vente) — nécessitera de vraies API métier et une
+  vraie base d'annonces, hors périmètre de US-012.
 - Vérification de la disponibilité d'un nom d'utilisateur (nécessite un point d'accès dédié,
   volontairement absent de US-009 pour ne pas exposer d'énumération des comptes).
 - Récupération de compte sans e-mail ni téléphone (voir question ouverte, section G).
@@ -1493,33 +1564,78 @@ explicite de l'utilisateur.
   3 langues — toujours hors de portée des outils disponibles ici.
 - **Commits** : `58bbdad` (vetement-back), `a9abfde` (vetement-front).
 
+### 2026-09-08 — US-012 — Page « Découvrir » avec les futures commandes désactivées
+
+- **Dépôt concerné** : vetement-front uniquement (« Aucune nouvelle API métier ni modification de
+  la base n'est nécessaire », exigence explicite du ticket) — `src/features/discover/`,
+  `src/app/[locale]/espace/page.tsx` réécrite, `src/app/[locale]/layout.tsx` (viewport), messages ;
+  ce fichier et le README front.
+- **Résultat réalisé et vérifié** : voir le détail technique complet en section D, sous-section
+  « Page Découvrir (US-012) » — organisation des composants, règle des boutons désactivés, zone de
+  sécurité tactile, tout y est déjà décrit, pas répété ici.
+- **Décision de conception non explicitement demandée par le ticket, mais nécessaire** : le
+  `<Footer/>` marketing (bas de page avec lien "retour en haut" et badge "Version de test"), présent
+  sur l'ancienne version minimale de `/espace`, a été retiré de cette page — une barre de
+  navigation fixe en bas d'écran sur téléphone rendait un pied de page classique redondant et
+  potentiellement gênant visuellement ; le `Header` marketing partagé (utilisé par l'accueil
+  publique) n'a lui, en revanche, **pas été modifié** : `/espace` utilise désormais son propre
+  `DiscoverHeader`, dédié.
+- **Vérifications effectuées (toutes réussies)** :
+  - `type-check`, `lint` (0 erreur, 3 avertissements bénins sur l'usage de `<img>` pour des SVG
+    décoratifs — même famille que l'avertissement déjà connu sur `ListingsPlaceholder`), 115 tests
+    (inchangés, aucun test existant cassé par ce changement de contenu de page), `build` (aucune
+    nouvelle route API, `/[locale]/espace` reste dynamique comme avant).
+  - **Vérification manuelle réelle en local** : inscription → page Découvrir affichée avec le
+    vrai nom d'utilisateur → comptage exact des 16 commandes désactivées attendues dans le HTML
+    rendu (3 en-tête + 3 recherche/localisation/filtres + 4 catégories + 2 tri/vendre + 4
+    navigation basse — aucune de plus, aucune de moins) → contenu et `dir="rtl"` vérifiés
+    correctement dans les 3 langues (`/fr/espace`, `/en/espace`, `/ar/espace`) → déconnexion et
+    redirection de protection toujours fonctionnelles après ce changement de contenu.
+  - **Vérification manuelle réelle en ligne, après déploiement Vercel du commit `e1fe7cd`** :
+    exactement le même parcours rejoué sur `https://vetement-front.vercel.app` — inscription
+    réelle → page Découvrir avec le vrai nom → 16 commandes désactivées comptées dans le HTML
+    réellement servi par Vercel → contenu et `dir="rtl"` corrects sur `/fr`, `/en`, `/ar` →
+    `<meta name="viewport" content="...viewport-fit=cover">` confirmé présent dans le HTML réel →
+    déconnexion réelle vérifiée.
+- **Compte de test réel créé pendant la vérification en ligne** (`e2e-us012-prod`) — fictif,
+  déconnecté après vérification, laissé en base sans urgence (même limite que d'habitude :
+  suppression réservée au rôle privilégié). Un second compte (`e2e-discover-fr`) a servi
+  uniquement à la vérification locale (base Postgres Docker jetable), jamais poussé vers Supabase.
+- **Non vérifié par l'agent** (nécessite un navigateur réel, hors de portée des outils
+  disponibles) : rendu visuel réel aux largeurs 320/390/768/1440px, absence de débordement
+  horizontal réelle, confort tactile, comportement réel de la zone de sécurité sur un téléphone à
+  encoche, Safari mobile — captures d'écran demandées par le ticket non fournies pour cette
+  raison.
+- **Commit** : `e1fe7cd` (vetement-front) ; aucun changement back-end pour ce ticket.
+
 ## I. Reprise à la prochaine session
 
 Rédigé le 2026-09-08, à la clôture volontaire de la session de travail (le projet sera repris
 plus tard, éventuellement par un autre intervenant humain ou IA). **Vérifié en direct au moment
 de la rédaction** (pas supposé) : les deux dépôts sont propres (`git status` sans changement non
 committé, hormis la mise à jour finale de ce fichier), le back répond en HTTPS avec le dernier
-commit, le front répond en HTTPS, et le parcours complet (inscription → déconnexion → reconnexion
-→ espace connecté) fonctionne en ligne à l'instant de la rédaction — voir le détail en section H.
+commit, le front répond en HTTPS avec le commit `e1fe7cd`, et le parcours complet (inscription →
+page Découvrir → déconnexion) fonctionne aussi bien en local qu'en ligne (Vercel) à l'instant de
+la rédaction — voir le détail en section H.
 
 ### Où nous nous sommes arrêtés
 
-**Aucun ticket n'est en cours.** Le dernier ticket traité (US-011 — connexion d'un compte
-existant) est **terminé et vérifié de bout en bout**, infrastructure réelle comprise : aucune
-nouvelle migration nécessaire (réutilise `app.users`/`app.sessions` de US-009/US-010 tels quels),
-page `/<langue>/connexion` et relais déployés, recette complète (inscription → déconnexion →
-reconnexion → espace connecté) rejouée avec succès sur les URL réelles. Le projet est dans un état
-stable et entièrement poussé — une prochaine session peut commencer un nouveau ticket sans reprise
-de travail interrompu.
+**Aucun ticket n'est en cours.** Le dernier ticket traité (US-012 — page Découvrir) est **terminé
+et vérifié de bout en bout, y compris en ligne** : déploiement Vercel du commit `e1fe7cd` confirmé
+(16 commandes désactivées comptées dans le HTML réel servi par Vercel, 3 langues et `dir="rtl"`
+réel vérifiés en ligne, `viewport-fit=cover` confirmé dans le HTML). Aucun changement back-end
+pour ce ticket (page entièrement visuelle, aucune nouvelle API ni migration). Le projet est dans
+un état stable et entièrement poussé — une prochaine session peut commencer un nouveau ticket sans
+reprise de travail interrompu.
 
 ### Dernier travail réalisé et son résultat
 
-1. US-011 (fonctionnalité) : `POST /api/auth/login`, page `/connexion`, protection anti-
-   énumération (même erreur et même temps de réponse pour un nom inconnu ou un mauvais mot de
-   passe) — écrit, testé (181 tests au total entre les deux dépôts), déployé et re-vérifié contre
-   l'infrastructure réelle — résultat : succès complet, recette en ligne exécutée intégralement.
-2. Activation des liens « Connexion » qui restaient désactivés depuis US-007 (en-tête, bas du
-   formulaire d'inscription) ; nettoyage des traductions et du test devenus obsolètes de ce fait.
+1. US-012 (fonctionnalité) : page « Découvrir » remplaçant le contenu minimal de `/espace` —
+   en-tête enrichi, recherche/localisation/filtres, catégories, zone d'annonces avec état vide,
+   navigation basse mobile, 16 commandes désactivées au total, aucune fonctionnelle — écrit, testé
+   (115 tests front inchangés, aucun cassé), vérifié manuellement en local **et en ligne** (3
+   langues, RTL réel, comptage exact des commandes désactivées, `viewport-fit=cover` réel,
+   protection et déconnexion toujours actives) — résultat : succès complet.
 
 ### Branches et commits utiles
 
@@ -1528,8 +1644,8 @@ aucun des deux dépôts au moment de la rédaction.
 
 | Dépôt | Dernier commit | Résumé |
 |---|---|---|
-| vetement-back | `58bbdad` (suivi d'une mise à jour de ce fichier, voir `git log -1`) | feat(US-011): log in with an existing account |
-| vetement-front | `a9abfde` | feat(US-011): login page, activate the login links everywhere |
+| vetement-back | `caf76ac` (suivi d'une mise à jour de ce fichier, voir `git log -1`) — **aucun changement de code pour US-012** | docs: record US-011 (login) and its live verification |
+| vetement-front | `e1fe7cd` | feat(US-012): Discover page with disabled future commands |
 
 **À la reprise, ne pas se fier uniquement à ce tableau** : exécuter `git log -1 --oneline` dans
 chaque dépôt pour confirmer le commit réellement présent, et comparer avec le commit affiché en
@@ -1581,7 +1697,10 @@ versionné, pointe vers ce même back local) — sans risque, mais à recréer s
   multi-largeurs, confort tactile réel, comportement du clavier virtuel mobile, Safari mobile en
   particulier — pourtant la raison d'être du relais US-010) — signalé systématiquement dans
   chaque entrée de journal concernée plutôt que supposé correct. À vérifier par un humain sur un
-  vrai appareil avant de considérer l'interface pleinement validée.
+  vrai appareil avant de considérer l'interface pleinement validée. **Particulièrement important
+  pour US-012** : navigation basse fixe, zone de sécurité tactile (`env(safe-area-inset-bottom)`),
+  absence de débordement horizontal — tout ceci n'a été vérifié que par lecture du HTML/CSS rendu,
+  jamais par un rendu visuel réel.
 
 ### Règles visuelles à respecter dans toute future intervention front
 
@@ -1600,7 +1719,18 @@ versionné, pointe vers ce même back local) — sans risque, mais à recréer s
   tout futur champ de mot de passe — motif désormais utilisé sur inscription ET connexion
   (US-011).
 - **Icônes/avatars en SVG dessiné pour le projet** (US-010, `Avatar.tsx`) — même logique que les
-  icônes œil, aucune bibliothèque d'icônes à ajouter pour de futurs pictogrammes simples.
+  icônes œil, aucune bibliothèque d'icônes à ajouter pour de futurs pictogrammes simples ; jeu
+  élargi dans `features/discover/icons.tsx` (US-012).
+- **Commandes pas encore fonctionnelles : de vrais `<button disabled>`, jamais `href="#"`**,
+  stylées par couleur/bordure plutôt qu'opacité réduite — et **une seule indication discrète
+  partagée pour toute une page**, pas une légende répétée sous chaque élément (contrairement au
+  motif `DisabledActionButton`/COR-005, qui répète "Bientôt disponible" sous chaque bouton — motif
+  à réserver aux cas d'un ou deux boutons isolés, pas à une page entière de commandes désactivées
+  comme US-012).
+- **Éléments fixes bas d'écran sur téléphone (barre de navigation, etc.)** : penser à
+  `viewport.viewportFit = 'cover'` (`[locale]/layout.tsx`) + `env(safe-area-inset-bottom)` sur
+  l'élément fixe + `padding-bottom` réservé sur le contenu principal pour ne rien masquer — motif
+  établi par `BottomNav` (US-012).
 
 ### Prochaines étapes proposées (aucune commencée)
 
@@ -1615,8 +1745,9 @@ d'entre elles :
 4. Élucider pourquoi le Pre-Deploy Command Render n'a pas appliqué la migration `sessions` lors de
    US-010 (voir « Problèmes connus » ci-dessus), avant qu'une prochaine migration ne rencontre le
    même sort.
-5. Premier développement fonctionnel produit (annonces) maintenant que l'authentification de base
-   est complète.
+5. Premier développement fonctionnel des annonces (recherche, catégories réelles, publication,
+   messagerie) — l'interface visuelle de US-012 est prête à accueillir cette logique, mais aucune
+   n'existe encore.
 
 ### Décisions à demander à l'utilisateur avant de poursuivre
 
