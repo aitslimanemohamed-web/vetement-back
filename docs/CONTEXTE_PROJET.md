@@ -1159,7 +1159,7 @@ aucun des deux dépôts au moment de la rédaction.
 
 | Dépôt | Dernier commit | Résumé |
 |---|---|---|
-| vetement-back | `6e5a1c5`, puis un commit de clôture documentaire supplémentaire créé à la toute fin de cette session (contenu : cette mise à jour de `CONTEXTE_PROJET.md`) | Dernier commit fonctionnel : rotation du mot de passe Supabase documentée. Le tout dernier commit du dépôt est purement documentaire. |
+| vetement-back | `9d541af` | docs: close out the session — reconcile stale status, add resume section (dernier commit fonctionnel avant celui-ci : `6e5a1c5`, rotation du mot de passe Supabase documentée) |
 | vetement-front | `1b68ba6` | feat(US-009): connect the registration form to the real API |
 
 **À la reprise, ne pas se fier uniquement à ce tableau** : exécuter `git log -1 --oneline` dans
