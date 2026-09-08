@@ -60,13 +60,11 @@ Android. Interface prévue en français, arabe et anglais.
 - Recherche : rayons de recherche géographique et fonctions de filtrage/recherche exactes.
 - Règles détaillées de réservation (durée exacte d'expiration, comportement en cas de refus...).
 - Options exactes de visibilité de la localisation d'un utilisateur/d'une annonce.
-- Hébergement (front-end, back-end, base de données, stockage photos) — **non validé** (voir
-  section D et journal TECH-003 : proposition en attente de validation par l'utilisateur,
-  notamment côté coût).
+- Stockage des photos d'annonces — hors périmètre de tout ticket réalisé à ce jour.
 
-**Besoin exprimé, en partie mis en œuvre** : un déploiement automatique doit se déclencher après
-un push. Les vérifications automatiques (CI) existent depuis TECH-003 sur les deux dépôts ; le
-déploiement effectif dépend du choix d'hébergement, non encore validé — voir section E.
+**Hébergement et déploiement automatique : réalisés et vérifiés** (Vercel + Render + Supabase,
+voir section D) — un push vers `main` déclenche un déploiement réel sur chaque plateforme,
+vérifié à de nombreuses reprises (voir section E et journal).
 
 ### Périmètre MVP confirmé (TECH-003)
 
@@ -156,7 +154,7 @@ Informations vérifiées le **2026-09-07**.
 | Front-end web | Next.js 16 + TypeScript, page d'accueil publique trilingue (US-004) + zone de diagnostic | **Déployé et vérifié en ligne** : https://vetement-front.vercel.app |
 | Front-end mobile (iOS/Android) | Applications mobiles | Reporté (hors périmètre MVP) |
 | Back-end / API | NestJS 12 + TypeScript sur Node.js — `GET /api/health` | **Déployé et vérifié en ligne** : https://vetement-back.onrender.com/api/health |
-| Base de données | PostgreSQL (Supabase) — table `app.users` (US-009) | **Code prêt et testé en local** (vraie base Postgres locale) ; **pas encore raccordé à un vrai projet Supabase** — voir sous-section « Base de données » et section E |
+| Base de données | PostgreSQL (Supabase) — table `app.users` (US-009) | **Déployée et vérifiée en ligne** — voir sous-section « Base de données » ci-dessous |
 | Authentification | Création de compte (nom d'utilisateur + mot de passe) | **Inscription réelle créée** (US-009) — connexion et sessions restent hors périmètre (voir questions ouvertes) |
 | Stockage des photos | Hébergement des photos d'annonces | Non créé |
 | Hébergement / déploiement | Mise en ligne des services, HTTPS, CI/CD | **Créé et vérifié** — voir sous-section « Hébergement » ci-dessous |
@@ -1099,5 +1097,152 @@ explicite de l'utilisateur.
   formulaire d'inscription du site Vercel lui-même (souris/clavier, écran réel) plutôt que par
   un appel direct à l'API reproduisant les mêmes en-têtes — le comportement de l'API étant
   identique dans les deux cas, ceci reste une vérification complémentaire, pas contradictoire.
-- **Travail restant pour US-009** : aucun côté infrastructure. Réinitialisation du mot de passe
-  principal Supabase recommandée (voir section E) — à confirmer par l'utilisateur.
+- **Travail restant pour US-009** : aucun côté infrastructure. US-009 est terminé.
+
+### 2026-09-08 — US-009 (clôture) — Rotation du mot de passe Supabase confirmée
+
+- **Dépôt concerné** : aucun changement de code ; configuration Supabase/Render et mise à jour
+  de ce fichier.
+- **Résultat** : l'utilisateur a réinitialisé le mot de passe principal du projet Supabase
+  (rôle `postgres`) depuis le dashboard Supabase, puis mis à jour `DIRECT_URL` sur Render.
+  Vérifié réellement après coup : `GET /api/health` inchangé, et un nouveau compte réel créé
+  avec succès via `POST /api/auth/register` (origine Vercel réelle), doublon ensuite refusé
+  (`409`) — la rotation n'a rien cassé, comme attendu (`DIRECT_URL` ne sert qu'aux migrations,
+  jamais à l'application en fonctionnement).
+- **Conséquence pour la suite** : l'agent n'a plus accès à `DIRECT_URL` (nouveau mot de passe
+  non transmis, volontairement). Toute future migration ou opération nécessitant le rôle
+  privilégié Supabase demandera à nouveau l'intervention de l'utilisateur pour fournir l'accès,
+  selon la même procédure que la première fois (section D).
+- **Comptes de test restés en base après cette clôture** (fictifs, sans donnée sensible autre
+  qu'une empreinte de mot de passe de test) : `Cloture-Session-Check` (créé pendant cette
+  dernière vérification) et potentiellement `Verif-Post-Rotation` (créé juste après la
+  rotation). Ni l'un ni l'autre ne peut être supprimé par le rôle applicatif `vetement_app`
+  (pas de droit `DELETE`, par conception) ; leur suppression demande un accès `DIRECT_URL`, que
+  l'agent n'a plus. À nettoyer par l'utilisateur si souhaité (éditeur SQL Supabase :
+  `DELETE FROM app.users WHERE username IN ('Cloture-Session-Check', 'Verif-Post-Rotation');`),
+  sans urgence.
+- **Travail restant** : aucun pour US-009. Voir la section « Reprise à la prochaine session »
+  ci-dessous pour la suite du projet.
+
+## I. Reprise à la prochaine session
+
+Rédigé le 2026-09-08, à la clôture volontaire de la session de travail (le projet sera repris
+plus tard, éventuellement par un autre intervenant humain ou IA). **Vérifié en direct au moment
+de la rédaction** (pas supposé) : les deux dépôts sont propres (`git status` sans changement,
+aucun commit local non poussé), les deux CI GitHub Actions les plus récentes sont vertes, le
+front répond en HTTPS, `GET /api/health` répond avec le dernier commit, et une inscription
+réelle suivie d'un refus de doublon fonctionnent en ligne à l'instant de la rédaction.
+
+### Où nous nous sommes arrêtés
+
+**Aucun ticket n'est en cours.** Le dernier ticket traité (US-009 — créer réellement les
+comptes) est **terminé et vérifié de bout en bout**, infrastructure réelle comprise : base
+Supabase créée, migrée, connectée ; inscription réelle fonctionnelle en ligne, avec refus de
+doublon et dégradation propre si la base est indisponible. La rotation de sécurité qui a suivi
+(voir journal, section H) est elle aussi terminée et vérifiée. Le projet est dans un état stable
+et entièrement poussé — une prochaine session peut commencer un nouveau ticket sans reprise de
+travail interrompu.
+
+### Dernier travail réalisé et son résultat
+
+1. US-009 (fonctionnalité) : inscription réelle (`POST /api/auth/register`) écrite, testée
+   contre une vraie base Postgres locale, puis déployée et re-vérifiée contre le vrai projet
+   Supabase — résultat : succès complet, recette en ligne du ticket exécutée intégralement.
+2. Rotation du mot de passe principal Supabase (incident mineur de sécurité, un mot de passe
+   passé une fois dans la conversation) — résultat : réinitialisé par l'utilisateur, re-vérifié
+   fonctionnel.
+
+### Branches et commits utiles
+
+Un seul environnement de travail par dépôt : branche `main`, pas d'autre branche active dans
+aucun des deux dépôts au moment de la rédaction.
+
+| Dépôt | Dernier commit | Résumé |
+|---|---|---|
+| vetement-back | `6e5a1c5`, puis un commit de clôture documentaire supplémentaire créé à la toute fin de cette session (contenu : cette mise à jour de `CONTEXTE_PROJET.md`) | Dernier commit fonctionnel : rotation du mot de passe Supabase documentée. Le tout dernier commit du dépôt est purement documentaire. |
+| vetement-front | `1b68ba6` | feat(US-009): connect the registration form to the real API |
+
+**À la reprise, ne pas se fier uniquement à ce tableau** : exécuter `git log -1 --oneline` dans
+chaque dépôt pour confirmer le commit réellement présent, et comparer avec le commit affiché en
+ligne (`GET /api/health` pour le back, l'en-tête ou le contenu de page pour le front) pour
+s'assurer que le déploiement correspond bien au dernier commit poussé.
+
+### Changements encore locaux ou non poussés
+
+**Aucun**, vérifié au moment de la rédaction (`git status` propre sur les deux dépôts, branche
+`main` alignée avec `origin/main`). Le seul fichier local non versionné est
+`vetement-back/.env` (secrets de développement local, correctement ignoré par Git) — son
+contenu pointe vers un conteneur Docker PostgreSQL local qui a été arrêté et supprimé à la fin
+de cette session ; il faudra en recréer un (ou ajuster `.env`) pour retester en local avec une
+vraie base avant la prochaine intervention nécessitant `npm run test:e2e` en local.
+
+### Problèmes connus (non bloquants, à garder en tête)
+
+- **Divergence de comptage Unicode front/back** (grappes de graphèmes côté front US-007, points
+  de code côté back US-009) — documentée en section D et G, jamais arbitrée. Risque limité à des
+  noms d'utilisateur contenant des marques diacritiques combinantes.
+- **Deux comptes de test résiduels** dans la vraie base Supabase (`Cloture-Session-Check`,
+  potentiellement `Verif-Post-Rotation`) — fictifs, sans donnée sensible, suppressibles
+  uniquement via un accès privilégié (`DIRECT_URL`) que l'agent n'a plus (voir ci-dessous).
+- **L'agent n'a plus accès à `DIRECT_URL`** (mot de passe Supabase tourné par l'utilisateur,
+  volontairement non retransmis). Toute opération nécessitant le rôle privilégié (nouvelle
+  migration, nettoyage direct en base) demandera de refournir cet accès, avec la même prudence
+  que la première fois (ne jamais coller de secret dans la conversation ; utiliser le fichier
+  `.env` local ou une autorisation explicite au cas par cas).
+- **Limitation de requêtes en mémoire, une seule instance** : redémarre à zéro à chaque
+  redéploiement Render ; non partagé si l'offre venait à inclure plusieurs instances (pas le cas
+  actuellement).
+- **Mise en veille Render (plan gratuit)** : ~30–60 s de démarrage à froid après une période
+  d'inactivité — géré côté front (indication après 10 s, abandon après 90 s) mais reste une
+  gêne perçue par un visiteur réel.
+- **Aucune vérification visuelle par un vrai navigateur n'a jamais été faite par l'agent**, sur
+  aucun ticket, faute d'outil disponible dans cet environnement (captures d'écran, rendu
+  multi-largeurs, confort tactile réel, comportement du clavier virtuel mobile) — signalé
+  systématiquement dans chaque entrée de journal concernée plutôt que supposé correct. À vérifier
+  par un humain sur un vrai appareil avant de considérer l'interface pleinement validée.
+
+### Règles visuelles à respecter dans toute future intervention front
+
+- **Thème clair forcé**, y compris si le système est en mode sombre (décision COR-005) — ne pas
+  réintroduire de bloc `@media (prefers-color-scheme: dark)` sur l'accueil/l'inscription sans
+  validation explicite de l'utilisateur.
+- **Contrastes** : viser au moins 4,5:1 pour tout texte, y compris les petits libellés/badges ;
+  ne jamais signaler un état (erreur, désactivé) uniquement par la couleur.
+- **Aucun motif de fond répété** (étoiles ou autre symbole décoratif répété) — règle explicite de
+  l'utilisateur (COR-006, section G) ; fonds unis uniquement, sauf validation contraire explicite.
+- **Formulaires responsives** : conteneur centré ~480px max, marges 16–24px, champs de largeur
+  identique, texte ≥16px (évite le zoom iOS), pas de bouton texte non rétrécissable dans une
+  ligne flex (cause réelle du bug corrigé en COR-008).
+- **Icônes œil intégrées** dans les champs de mot de passe (position absolue, zone tactile
+  44×44px, `aria-label` traduit, jamais de texte visible ni d'emoji) — motif à reproduire pour
+  tout futur champ de mot de passe (page de connexion, etc.).
+
+### Prochaines étapes proposées (aucune commencée)
+
+Par ordre plausible, sans engagement — à confirmer par l'utilisateur avant de commencer l'une
+d'entre elles :
+1. Décider du mécanisme de connexion/session (JWT ? cookie de session ?), puis créer la page et
+   l'API de connexion (le bouton Connexion de l'accueil est prêt, juste désactivé).
+2. Décider d'une méthode de récupération de compte sans e-mail ni téléphone (question ouverte
+   posée par deux tickets consécutifs, jamais tranchée).
+3. Décider si un point d'accès de vérification de disponibilité du nom d'utilisateur est
+   nécessaire (compromis avec le risque d'énumération des comptes, volontairement évité jusqu'ici).
+4. Arbitrer la divergence de comptage Unicode front/back.
+5. Premier développement fonctionnel produit (annonces) une fois l'authentification complète.
+
+### Décisions à demander à l'utilisateur avant de poursuivre
+
+- Toutes les questions listées en section G ("Questions ouvertes") restent sans réponse —
+  les relire avant de proposer un prochain ticket.
+- Nettoyer ou laisser les comptes de test résiduels dans Supabase (voir ci-dessus) ?
+- Choix du mécanisme de connexion/session (question technique structurante pour tout le reste).
+- Le nom de marque « Vetement » reste-t-il provisoire indéfiniment, ou une marque définitive
+  doit-elle être fixée avant de poursuivre le développement produit ?
+
+### Rappel
+
+Ce fichier documente des accès (GitHub, Vercel, Render, Supabase) qui étaient valides à la date
+de rédaction ci-dessus. **Aucune garantie qu'ils le soient encore à la prochaine session** — un
+jeton peut expirer, un mot de passe peut avoir été changé entre-temps (comme celui de Supabase
+pendant cette session même). Revérifier systématiquement avant de supposer un accès acquis
+(section C, procédure de vérification).
