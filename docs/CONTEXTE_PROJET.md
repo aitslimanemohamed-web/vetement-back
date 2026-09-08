@@ -1350,6 +1350,43 @@ explicite de l'utilisateur.
   suppression ne renvoyant plus aucune ligne pour ces 4 noms.
 - **Travail restant** : aucun.
 
+### 2026-09-08 — US-010 (correctifs) — Relecture stricte du ticket, 3 écarts corrigés
+
+- **Dépôt concerné** : vetement-front uniquement.
+- **Contexte** : après la mise en ligne, relecture systématique des 13 sections et des 11
+  critères d'acceptation du ticket US-010 face au code livré. Trois écarts réels identifiés (le
+  reste était déjà conforme) :
+  1. **Section 9 du ticket** (« afficher un message et une action Réessayer » en cas de panne) :
+     `SessionWatcher.tsx` ne faisait qu'une nouvelle tentative automatique silencieuse toutes les
+     60s, sans action cliquable. Ajout d'un bouton « Réessayer » (désactivé pendant la vérification,
+     libellé « Nouvelle tentative… »), qui déclenche la même fonction de vérification que la
+     boucle automatique — les deux mécanismes coexistent.
+  2. **Section 4 du ticket** (« l'identité de l'utilisateur, un lien « Mon espace » et la
+     déconnexion ») : `Header.tsx` ne rendait cliquable que le nom d'utilisateur lui-même vers
+     `/espace`, sans lien séparé littéralement libellé « Mon espace ». Ajout de ce lien distinct
+     (nouvelle clé de traduction `header.mySpace`, fr/en/ar), le nom d'utilisateur redevenant un
+     simple texte non cliquable.
+  3. **Section 8 du ticket** (« Appliquer `Cache-Control: no-store` aux réponses personnalisées »)
+     : ce réglage existait déjà sur les 3 routes relais (`/api/auth/*`) mais pas sur la page
+     `/espace` elle-même. Ajouté dans `src/proxy.ts` (en-tête posé sur toute requête dont le
+     chemin correspond à `/<langue>/espace`) — défense en profondeur contre le cache
+     "retour" du navigateur (bfcache) après une déconnexion.
+- **Vérifications effectuées** : `type-check`, `lint` (0 erreur, mêmes 2 avertissements bénins
+  déjà connus), 96 tests front (2 nouveaux pour le bouton Réessayer), `build`. **Point technique
+  noté en cours de route** : le serveur de développement local affichait
+  `Cache-Control: no-cache, must-revalidate` sur `/espace` (sans `no-store`) — comportement propre
+  au mode développement de Next.js. Vérifié directement sur le vrai déploiement Vercel après
+  correctif : `private, no-cache, no-store, max-age=0, must-revalidate` — `no-store` bien présent
+  en production, ce qui est ce qui compte réellement. Recette complète rejouée en ligne après ce
+  correctif (inscription → « Mon espace » visible dans l'en-tête → déconnexion → `/espace`
+  de nouveau protégé) : succès.
+- **Compte de test réel créé pendant cette vérification** (`e2e-fixes-final`) — fictif, laissé en
+  base sans urgence (même limite que d'habitude : suppression réservée au rôle privilégié).
+- **Limites persistantes, non corrigibles dans cet environnement** : comportement réel sur Safari
+  mobile, rendu visuel réel (captures d'écran, responsive, RTL, noms arabes longs) — toujours hors
+  de portée des outils disponibles ici, signalé plutôt que supposé correct.
+- **Commit** : `edc7cf5` (vetement-front).
+
 ## I. Reprise à la prochaine session
 
 Rédigé le 2026-09-08, à la clôture volontaire de la session de travail (le projet sera repris
@@ -1388,8 +1425,8 @@ aucun des deux dépôts au moment de la rédaction.
 
 | Dépôt | Dernier commit | Résumé |
 |---|---|---|
-| vetement-back | `8b7bbba` (suivi d'une mise à jour de ce fichier, voir `git log -1`) | feat(US-010): create a real server-side session on registration |
-| vetement-front | `34c3da3` | feat(US-010): protected space, auto-login after registration |
+| vetement-back | `b1381b8` (suivi d'une mise à jour de ce fichier, voir `git log -1`) | docs: record cleanup of the residual test accounts in Supabase |
+| vetement-front | `edc7cf5` | fix(US-010): explicit retry action, separate "my space" link, no-store |
 
 **À la reprise, ne pas se fier uniquement à ce tableau** : exécuter `git log -1 --oneline` dans
 chaque dépôt pour confirmer le commit réellement présent, et comparer avec le commit affiché en
