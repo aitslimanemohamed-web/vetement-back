@@ -427,13 +427,18 @@ projet). Contournement vérifié : `npm install --legacy-peer-deps` (ou `npm ci
 **Bloqué :**
 - Aucun blocage actif au moment de la rédaction.
 
-**Point de sécurité signalé, action recommandée non encore confirmée** :
-- Le mot de passe principal du projet Supabase (rôle `postgres`) est passé une fois dans la
-  conversation avec l'agent lors de la mise en place initiale (2026-09-08). Recommandation :
-  le réinitialiser depuis le dashboard Supabase (Project Settings → Database → "Reset database
-  password") par précaution, puis mettre à jour `DIRECT_URL` sur Render en conséquence. Le mot
-  de passe du rôle applicatif `vetement_app`, lui, a été généré et fixé directement par l'agent
-  sans jamais transiter en clair dans un message de l'utilisateur.
+**Point de sécurité signalé le 2026-09-08, résolu le même jour** :
+- Le mot de passe principal du projet Supabase (rôle `postgres`) était passé une fois dans la
+  conversation avec l'agent lors de la mise en place initiale. **Réinitialisé par
+  l'utilisateur** depuis le dashboard Supabase (Project Settings → Database → "Reset database
+  password"), puis `DIRECT_URL` mis à jour sur Render en conséquence — vérifié fonctionnel
+  ensuite (`GET /api/health` et `POST /api/auth/register` inchangés, un compte réel créé avec
+  succès après la rotation). Note technique : une tentative de l'agent de faire cette rotation
+  directement en SQL (`ALTER ROLE "postgres" ...`) a échoué avec `permission denied to alter
+  role` — Supabase réserve visiblement cette opération à son propre mécanisme de dashboard,
+  inaccessible en SQL direct même avec le rôle `postgres`. Le mot de passe du rôle applicatif
+  `vetement_app`, lui, a été généré et fixé directement par l'agent sans jamais transiter en
+  clair dans un message de l'utilisateur.
 
 ## F. Reprise du travail
 
